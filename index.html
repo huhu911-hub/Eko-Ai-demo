@@ -7203,10 +7203,11 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     const L = listedData(), code = L.d[id] ? id : L.byTax[id];
     if (code) regApply(id, '上市櫃', L.d[code][1], L.d[code][2], '');
   }
-  function regLookup(id) {  // 經濟部：只查 8 碼統編；同一個統編只查一次
-    window.__regBusy = window.__regBusy || {};
-    if (window.__regBusy[id]) return; window.__regBusy[id] = 1;
+  function regLookup(id) {  // 經濟部：只查 8 碼統編。查過的結果記在 __regCache，換別的代號再換回來直接用（11/05 Maggie 測到：換回來會卡在「正在查詢」）
+    window.__regCache = window.__regCache || {}; window.__regBusy = window.__regBusy || {};
     const done = (j) => {
+      if (j && !j.err) window.__regCache[id] = j;   // 查失敗不記，下次再查
+      delete window.__regBusy[id];
       const p = S.intake.profile;
       if (p._prefillMiss !== id || (p._reg && p._reg.id === id)) return;   // 對方已經改了代號
       if (j && j.found) regApply(id, '經濟部', j.name, j.year, j.status);
@@ -7214,6 +7215,8 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       save();
       if (S.view === 'profile') { const y = window.scrollY, a = document.activeElement && document.activeElement.id; render(); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); if (a) { const el = document.getElementById(a); if (el) { el.focus(); if (el.setSelectionRange && el.type === 'text') el.setSelectionRange(el.value.length, el.value.length); } } }
     };
+    if (window.__regCache[id]) return done(window.__regCache[id]);
+    if (window.__regBusy[id]) return; window.__regBusy[id] = 1;
     fetch(REG_URL + '?gcis=' + encodeURIComponent(id)).then((r) => r.json()).then(done).catch(() => done(null));
   }
   function regHint(p) {
