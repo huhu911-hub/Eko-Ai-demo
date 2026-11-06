@@ -2477,7 +2477,7 @@ if (typeof module !== 'undefined') module.exports = DATA; else window.DATA = DAT
 
   function blankIntake() {
     return {
-      profile: { name: '', industry: '', region: '', size: '', founded: '', products: '', focus: '', taxId: '', industryOther: '', salesRegionsOther: '', revenue: '', respondent: '', respondentOther: '', operatingMargin: '', patents: '', rdRatio: '', overseas: '', bigCust: '', bigCustShare: '', productCount: '', salesRegions: [] },
+      profile: { name: '', industry: '', region: '', size: '', founded: '', products: '', focus: '', taxId: '', industryOther: '', regionOther: '', salesRegionsOther: '', revenue: '', respondent: '', respondentOther: '', operatingMargin: '', patents: '', rdRatio: '', overseas: '', bigCust: '', bigCustShare: '', productCount: '', salesRegions: [] },
       facts: {}, // 附帶題（Q17、Q19、Q26），不計分
       answers: {},
       goals: { ipPrimary: '', ipSecondary: '', horizon: '', target: '', lastRound: '', sca: [] },
@@ -2494,7 +2494,9 @@ if (typeof module !== 'undefined') module.exports = DATA; else window.DATA = DAT
     const p = intake.profile;
     if (!p.name.trim()) m.push(['profile', '公司名稱']);
     if (!p.industry) m.push(['profile', '產業']);
+    if (p.industry === 'other' && !String(p.industryOther || '').trim()) m.push(['profile', '其他產業名稱']);
     if (!p.region) m.push(['profile', '總部所在國家']);
+    if (p.region === 'OTHER' && !String(p.regionOther || '').trim()) m.push(['profile', '其他國家名稱']);
     if (!String(p.taxId || '').trim()) m.push(['profile', '公司統編／股票代號']);
     if (!p.revenue) m.push(['profile', '年營業額']);
     if (!p.respondent) m.push(['profile', '受訪者職位']);
@@ -7271,8 +7273,9 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
           <div class="field${mf('公司名稱')}"><label for="p-name">公司名稱</label><input type="text" id="p-name" data-bind="profile.name" value="${esc(v('name'))}" autocomplete="organization"></div>
           <div class="field" style="grid-column:1 / -1;margin-top:-8px">${(p._prefill || []).length ? '' : regHint(p)}</div>
           <div class="field${mf('產業')}"><label for="p-industry">產業</label>${sel('p-industry', 'industry', I.INDUSTRIES)}</div>
-          ${p.industry === 'other' ? `<div class="field"><label for="p-industryOther">其他產業（請填寫）</label>${txt('p-industryOther', 'industryOther', '請填寫產業')}</div>` : ''}
+          ${p.industry === 'other' ? `<div class="field${mf('其他產業名稱')}"><label for="p-industryOther">其他產業（請填寫）</label>${txt('p-industryOther', 'industryOther', '請填寫產業')}</div>` : ''}
           <div class="field${mf('總部所在國家')}"><label for="p-region">總部所在國家</label>${sel('p-region', 'region', I.REGIONS)}</div>
+          ${p.region === 'OTHER' ? `<div class="field${mf('其他國家名稱')}"><label for="p-regionOther">其他國家（請填寫）</label>${txt('p-regionOther', 'regionOther', '請填寫國家')}</div>` : ''}
           <div class="field${mf('年營業額')}"><label for="p-revenue">年營業額</label>${sel('p-revenue', 'revenue', P_REVENUE)}</div>
           <div class="field${mf('受訪者職位')}"><label for="p-respondent">受訪者職位</label>${sel('p-respondent', 'respondent', P_RESP)}</div>
           <div class="field${mf('研發投入比')}"><label for="p-rd">研發投入比（研發費用占營收）</label>${sel('p-rd', 'rdRatio', P_RD)}</div>
@@ -8374,7 +8377,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     }
     if (t.name === 'goals.ipPrimary' && S.intake.goals.ipSecondary === t.value) S.intake.goals.ipSecondary = '';
     if (t.dataset.bind === 'profile.taxId' && applyPrefill(t.value)) { save(); const y = window.scrollY; render(); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); const el = document.getElementById('p-taxid'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } return; }
-    const FOLLOW = { 'profile.industry': ['industryOther', 'other'], 'profile.respondent': ['respondentOther', '其他'], 'profile.bigCust': ['bigCustShare', 'yes'] };
+    const FOLLOW = { 'profile.industry': ['industryOther', 'other'], 'profile.region': ['regionOther', 'OTHER'], 'profile.respondent': ['respondentOther', '其他'], 'profile.bigCust': ['bigCustShare', 'yes'] };
     if (FOLLOW[t.dataset.bind]) { const [k, on] = FOLLOW[t.dataset.bind]; if (t.value !== on) S.intake.profile[k] = ''; save(); const y = window.scrollY; render(); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); return; }
     save();
   }
