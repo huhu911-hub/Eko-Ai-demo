@@ -7233,7 +7233,8 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
   function applyPrefill(v) {
     const { d, byCode } = prefillData();
     const k = String(v || '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/\s/g, ''); // 全形數字（中文輸入法）也認得
-    const key = d[k] ? k : byCode[k];
+    const ALIAS = {"3718": "5371", "62067997": "5371"};   // 換代號的同一家公司（3718＝中強光電 5371 的控股公司）
+    const key = d[k] ? k : (byCode[k] || byCode[ALIAS[k]]);
     const p = S.intake.profile;
     if (!key) {   // 查不到：4 碼代號或 8 碼統編打完整才提示；之前帶入的別家資料要清掉，免得留著錯的公司
       const full = /^\d{4}$|^\d{8}$/.test(k);
