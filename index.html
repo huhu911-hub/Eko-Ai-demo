@@ -6828,7 +6828,7 @@ if (typeof module !== 'undefined') module.exports = DATA; else window.DATA = DAT
       limitations: [
         '不估計營收、投資報酬率或精準分數。',
         '組織文化與結構、同業百分位比較，在這一版不納入。',
-        '論文樣本為英國與台灣的高科技企業；其他地區與產業屬外推。',
+        '本報告的比較基準，來自英國與台灣十個高科技產業（半導體、再生能源等）的企業研究。貴公司若屬於其他產業或地區，結果僅供參考。',
         '碳資產建議尚未整合，將在 BM–Carbon Assets Bridge 完成後加入。',
       ],
     };
@@ -7226,7 +7226,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     if (!id) return base;
     const r = p._reg && p._reg.id === id ? p._reg : null;
     if (r && r.found) { const info = [r.status, r.year ? r.year + ' 年設立' : ''].filter(Boolean).join('，');
-      return `<span class="hint">${r.src === '上市櫃' ? '依證交所／櫃買中心公司基本資料' : '依經濟部商工登記'}：<b>${esc(r.name)}</b>${info ? `（${esc(info)}）` : ''}。${r.filled.length ? `已帶入${r.filled.filter((f) => f !== 'industryOther').map((f) => ({ name: '公司名稱', founded: '成立年份', industry: `產業（其他產業：${esc(r.vals.industryOther)}）` })[f]).join('、')}，` : ''}其他欄位請自行填寫。</span>`; }
+      return `<span class="hint">${r.src === '上市櫃' ? '依證交所／櫃買中心公司基本資料' : '依經濟部商工登記'}：<b>${esc(r.name)}</b>${info ? `（${esc(info)}）` : ''}。</span>`; }
     if (!/^\d{8}$/.test(id)) return `<span class="hint">查無股票代號 ${esc(id)}（證交所與櫃買中心名單都沒有），請確認代號，或改輸入 8 碼統編。</span>`;
     if (!r) { setTimeout(() => regLookup(id), 0); return '<span class="hint">正在查詢經濟部商工登記…</span>'; }
     if (r.err) return '<span class="hint">暫時查不到經濟部商工登記，請自行填寫公司名稱與以下欄位。</span>';
@@ -7267,8 +7267,8 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
         <div class="grid2">
           <div class="field${mf('公司統編／股票代號')}"><label for="p-taxid">公司統編／股票代號</label>${txt('p-taxid', 'taxId', '統編 8 碼或股票代號 4 碼')}</div>
           <div class="field${mf('公司名稱')}"><label for="p-name">公司名稱</label><input type="text" id="p-name" data-bind="profile.name" value="${esc(v('name'))}" autocomplete="organization"></div>
-          <div class="field" style="grid-column:1 / -1;margin-top:-8px">${(p._prefill || []).length ? `<span class="hint">已從公開資料帶入 ${p._prefill.length} 欄：${p._prefill.map((k) => PREFILL_LABEL[k]).join('、')}。可以修改；沒帶入的欄位請自行填寫。</span>` : regHint(p)}</div>
-          <div class="field${mf('產業')}"><label for="p-industry">產業</label>${sel('p-industry', 'industry', I.INDUSTRIES)}<span class="hint">論文研究的十個高科技產業；其他產業屬外推</span></div>
+          <div class="field" style="grid-column:1 / -1;margin-top:-8px">${(p._prefill || []).length ? '' : regHint(p)}</div>
+          <div class="field${mf('產業')}"><label for="p-industry">產業</label>${sel('p-industry', 'industry', I.INDUSTRIES)}</div>
           ${p.industry === 'other' ? `<div class="field"><label for="p-industryOther">其他產業（請填寫）</label>${txt('p-industryOther', 'industryOther', '請填寫產業')}</div>` : ''}
           <div class="field${mf('主要營運地區')}"><label for="p-region">主要營運地區</label>${sel('p-region', 'region', I.REGIONS)}</div>
           <div class="field${mf('年營業額')}"><label for="p-revenue">年營業額</label>${sel('p-revenue', 'revenue', P_REVENUE)}</div>
@@ -8033,7 +8033,6 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     return `<section class="rsec" id="s-p1"><h3><small>P1 · Executive Strategic Advice</small>策略建議總覽</h3>
       ${adviceBlock(r)}
       <div class="vpanels">${positionPanel(r)}${pathwayPanel(r)}${foresightPanel(r)}</div>
-      ${industryLine(r)}
       <div class="vis-head"><h4>BMI 候選方向</h4><span class="small muted">目前建議的完整說明</span></div>
       ${decisionCard(r.actions)}
       ${leadBasis}
