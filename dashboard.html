@@ -7514,12 +7514,13 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     }
     if (p && p.cust && p.cust.length) {
       const hhi = p.cust.reduce((s, v) => s + v * v, 0), top4 = p.cust.slice(0, 4).reduce((s, v) => s + v, 0), rest = 100 - p.cust.reduce((s, v) => s + v, 0);
-      const cls = hhi < 1500 ? '分散' : hhi <= 2500 ? '中等' : '集中';
+      const clsOf = (h) => h < 1500 ? '分散' : h <= 2500 ? '中等' : '集中', cls = clsOf(hhi);
+      const hiH = hhi + 10 * Math.max(0, rest);   // 11/12：未揭露的每家 <10%，平方和 ≤ 10 × 其餘占比
       cust = `<div class="kpis kpis3"><div class="kpi"><div class="kl">HHI（已揭露客戶）</div><div class="kv">${Math.round(hhi).toLocaleString('zh-TW')}</div><div class="ks">${cls}（&lt;1500 分散／1500–2500 中等／&gt;2500 集中）</div></div>
-        <div class="kpi"><div class="kl">最大客戶</div><div class="kv">${dfmt(p.cust[0], 2)}%</div><div class="ks">占營收</div></div><div class="kpi"><div class="kl">前 ${Math.min(4, p.cust.length)} 大合計</div><div class="kv">${dfmt(top4, 2)}%</div><div class="ks">占營收</div></div></div>
+        <div class="kpi"><div class="kl">最大客戶</div><div class="kv">${dfmt(p.cust[0], 2)}%</div><div class="ks">占營收</div></div>${p.cust.length > 1 ? `<div class="kpi"><div class="kl">前 ${Math.min(4, p.cust.length)} 大合計</div><div class="kv">${dfmt(top4, 2)}%</div><div class="ks">占營收</div></div>` : '<div class="kpi"><div class="kl">已揭露客戶</div><div class="kv">1 家</div><div class="ks">占營收 10% 以上</div></div>'}</div>
         ${dashHHI(hhi)}
         ${p.cust.map((v, i) => dbar('客戶' + String.fromCharCode(65 + i), v, 100, 'var(--accent)', dfmt(v, 2) + '%')).join('')}
-        <p class="note">HHI 只計財報揭露的 ${p.cust.length} 家客戶${rest > 0.05 ? `；其餘 ${dfmt(rest, 2)}% 的組成未揭露，所以 HHI 是下限` : ''}。客戶以代號呈現，不具名。</p>`;
+        <p class="note">HHI 只計財報揭露的 ${p.cust.length} 家客戶。${rest > 0.05 ? `財報只需揭露占營收 10% 以上的客戶，其餘 ${dfmt(rest, 2)}% 分散在每家都低於 10% 的客戶；全部算進來，HHI 最多約 ${Math.round(hiH).toLocaleString('zh-TW')}，${clsOf(hiH) === cls ? `仍屬${cls}` : `可能落在${cls}到${clsOf(hiH)}之間`}。` : ''}客戶以代號呈現，不具名。</p>`;
     }
     let reg = '<p class="note">財報附註未揭露地區別銷貨，無法計算。</p>';
     if (p && p.reg && p.reg.length) {
@@ -7536,7 +7537,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
           <p class="note">十組件是「怎麼做生意」的十個面向；三種競爭方式是把這十個面向分成三群。各構面分數＝所屬組件分數依論文因素負荷量加權平均，配比＝三個構面各占合計的比重。這是暫行計算方式，尚未完成驗證。</p></div></div>
       <div class="dc"><h3>自評落差</h3><p class="dh">您的自評 − 公開資料（1–5 分）；差距大的組件，是報告最值得再核對的地方</p>${dashGap(x)}</div>
       <div class="dc"><h3>十組件逐項對照</h3><p class="dh">公開資料分數 vs 問卷自評；差距＝自評 − 公開資料</p><div style="overflow-x:auto"><table class="dtb"><thead><tr><th>組件</th><th>屬於</th><th>公開資料</th><th>自評</th><th>差距</th><th>公開資料依據</th></tr></thead><tbody>${rows}</tbody></table></div></div>
-      <div class="dc"><h3>集中度風險</h3><p class="dh">${custSrc}</p>${cust}</div>
+      <div class="dc"><h3>集中度風險</h3><p class="dh">${custSrc}</p><p>看營收是否過度依賴少數客戶；越集中，失去一個大客戶的衝擊越大。</p>${cust}</div>
       <div class="g2"><div class="dc"><h3>地區別銷售</h3><p class="dh">財報附註・按地區別銷貨</p>${reg}</div>
         <div class="dc"><h3>創新類型</h3><p class="dh">依您的第 37 題作答</p>${q37 ? `<p><b>${esc(q37.opts[String(a.Q37)] || '')}</b></p>` : '<p class="note">第 37 題未作答。</p>'}
           <p class="note">突破式創新常伴隨較高的能耗與材料變動；益珂協助在研發早期納入低碳製程與材料。</p></div></div>
