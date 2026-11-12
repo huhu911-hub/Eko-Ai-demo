@@ -2497,6 +2497,8 @@ if (typeof module !== 'undefined') module.exports = DATA; else window.DATA = DAT
     { id: 'outcome', title: '創新成果', sub: '新產品的品質、市場創新程度、銷售與類型', comps: ['IP', 'IT'] },
   ];
   function sectionQuestions(sec) { return QUESTIONS.filter((q) => sec.comps.includes(q.comp)); }
+  const Q_NO = {}; SECTIONS.forEach((sec) => sectionQuestions(sec).forEach((q) => { Q_NO[q.id] = Object.keys(Q_NO).length + 1; }));
+  function qNo(id) { return Q_NO[id]; } // 畫面題號（1–37）
 
   function blankIntake() {
     return {
@@ -2616,7 +2618,7 @@ if (typeof module !== 'undefined') module.exports = DATA; else window.DATA = DAT
 
   const INTAKE = {
     INDUSTRIES, REGIONS, SIZES, FOCUS, IP_GOALS, HORIZONS, LAST_ROUND, SCA_SOURCES, SIGNAL_TYPES, SIGNAL_SOURCES,
-    CRA_ASK, CRA_OPTIONS, FEAS_OPTIONS, SECTIONS, sectionQuestions, blankIntake, missing, evidenceModels, primaryBM, toEngineState, assess,
+    CRA_ASK, CRA_OPTIONS, FEAS_OPTIONS, SECTIONS, sectionQuestions, qNo, blankIntake, missing, evidenceModels, primaryBM, toEngineState, assess,
   };
   if (typeof module !== 'undefined') module.exports = INTAKE; else root.INTAKE = INTAKE;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -7516,7 +7518,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       <div class="dc"><h3>十組件逐項對照</h3><p class="dh">公開資料分數 vs 問卷自評；差距＝自評 − 公開資料</p><div style="overflow-x:auto"><table class="dtb"><thead><tr><th>組件</th><th>屬於</th><th>公開資料</th><th>自評</th><th>差距</th><th>公開資料依據</th></tr></thead><tbody>${rows}</tbody></table></div></div>
       <div class="dc"><h3>集中度風險</h3><p class="dh">財報附註・主要客戶占營收比</p>${cust}</div>
       <div class="g2"><div class="dc"><h3>地區別銷售</h3><p class="dh">財報附註・按地區別銷貨</p>${reg}</div>
-        <div class="dc"><h3>創新類型</h3><p class="dh">依您的 Q37 作答</p>${q37 ? `<p><b>${esc(q37.opts[String(a.Q37)] || '')}</b></p>` : '<p class="note">Q37 未作答。</p>'}
+        <div class="dc"><h3>創新類型</h3><p class="dh">依您的第 37 題作答</p>${q37 ? `<p><b>${esc(q37.opts[String(a.Q37)] || '')}</b></p>` : '<p class="note">第 37 題未作答。</p>'}
           <p class="note">突破式創新常伴隨較高的能耗與材料變動；益珂協助在研發早期納入低碳製程與材料。</p></div></div>
       ${p && dashData()._ind[p.ind] ? (() => { const I = dashData()._ind[p.ind]; return `<div class="dc"><h3>產業背景：${esc(p.ind)}</h3><p class="dh">產業層級通則（EKO 產業手冊），不是貴公司的實測</p>
         <div class="g3"><div><h4 style="font-size:14px;margin:4px 0">成本結構</h4><p class="note">${esc(I.cost)}</p></div><div><h4 style="font-size:14px;margin:4px 0">創新的型態</h4><p class="note">${esc(I.innov)}</p></div><div><h4 style="font-size:14px;margin:4px 0">市場與通路</h4><p class="note">${esc(I.chan)}</p></div></div></div>`; })() : ''}
@@ -7539,7 +7541,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
         <div class="g3" style="margin-top:8px">${order.map((t) => `<div><h4 style="color:${DASH_TN[t][1]};font-size:14px;margin:8px 0 4px">${DASH_TN[t][0]}｜${lvl[t][1]}</h4><p>${esc(A[t][lvl[t][1]]['這個位置代表什麼'])}</p></div>`).join('')}</div></div>
       ${[['② 第一步做什麼', '建議採取行動／判斷'], ['③ 需要什麼資源', '行動需要的資源'], ['④ 什麼時候不要做', '行動暫緩之觀察節點']].map(([h, k]) => `<div class="dc p3b"><h3>${h}</h3><div class="g3">${order.map((t) => `<div><h4 style="color:${DASH_TN[t][1]}">${DASH_TN[t][0]}</h4><p>${esc(A[t][lvl[t][1]][k])}</p></div>`).join('')}</div></div>`).join('')}
       <div class="dc p3b"><h3>法規與市場背景</h3><p class="dh">已公開的靜態資訊；適用性須由企業自行核對</p><div class="g3">${order.map((t) => `<div><h4 style="color:${DASH_TN[t][1]}">${DASH_TN[t][0]}</h4><p>${esc(A[t][lvl[t][1]]['法規與市場背景'])}</p></div>`).join('')}</div></div>
-      <div class="dc"><h3>創新績效佐證 F／M／S</h3><p class="dh">Q34–36・1–5 分・依您的問卷作答</p>${fms.map(([q, l]) => dbar(l, a[q], 5, 'var(--accent)', a[q] == null ? '未答' : a[q] + ' 分')).join('')}
+      <div class="dc"><h3>創新績效佐證 F／M／S</h3><p class="dh">第 34–36 題・1–5 分・依您的問卷作答</p>${fms.map(([q, l]) => dbar(l, a[q], 5, 'var(--accent)', a[q] == null ? '未答' : a[q] + ' 分')).join('')}
         <p class="note">與上方三構面配比互為對照：配比是資源投入的方向，F／M／S 是新產品實際成果的自評。</p></div>
       <p class="note">建議內容：EKO 三構面建議表（3 構面 × 4 級距＝12 組）。級距＝配比在 1,211 家中的百分位，不等於經營績效或優劣判斷。</p>`;
   }
@@ -7703,7 +7705,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       return `<div class="dc"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3 style="margin:0">${esc(sc.title)}</h3><button type="button" class="btn small ghost" data-go="assess" data-sec="${i}">修改這一段</button></div>
         <table class="dtb" style="margin-top:8px"><tbody>${qs.map((q) => { const v = a[q.id], fx = q.fact && f[q.id];
           const fv = fx == null || fx === '' || (Array.isArray(fx) && !fx.length) ? '' : (Array.isArray(fx) ? fx : [fx]).map((o) => q.fact.opts[String(o)] || o).join('、');
-          return `<tr><td style="width:44px" class="note">${q.id}</td><td>${esc(q.text)}${fv ? `<div class="note" style="margin-top:4px">${esc(q.fact.text)}：${esc(fv)}</div>` : ''}</td><td style="width:38%">${v == null ? '<span class="miss">未答</span>' : `<b>${v}</b>　${esc(q.opts[String(v)] || '')}`}</td></tr>`; }).join('')}</tbody></table></div>`; }).join('');
+          return `<tr><td style="width:44px" class="note">${I.qNo(q.id)}</td><td>${esc(q.text)}${fv ? `<div class="note" style="margin-top:4px">${esc(q.fact.text)}：${esc(fv)}</div>` : ''}</td><td style="width:38%">${v == null ? '<span class="miss">未答</span>' : `<b>${v}</b>　${esc(q.opts[String(v)] || '')}`}</td></tr>`; }).join('')}</tbody></table></div>`; }).join('');
     const n = window.ENGINE.QUESTIONS.filter((q) => a[q.id] != null).length;
     return `<main class="wrap dash"><p class="dsub" style="margin:0">Step 2 · Your Answers</p><h2 class="dt">評估問卷：您的 37 題作答</h2><p class="dsub">已答 ${n}／37 題。要修改，按該段右邊的「修改這一段」。</p>
       ${sec}<div class="navrow"><span></span><button class="btn primary" data-go="dash">回到商模診斷報告</button></div></main>`;
@@ -7735,7 +7737,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       <div class="card">${qs.map((q) => {
         const miss = S.showMissing && S.intake.answers[q.id] == null;
         const keys = Object.keys(q.opts).sort();
-        return `<div class="q${miss ? ' missing' : ''}" id="q-${q.id}"><div><span class="qnum">${q.id}</span> <span class="qtitle">${esc(q.text)}</span></div>
+        return `<div class="q${miss ? ' missing' : ''}" id="q-${q.id}"><div><span class="qnum">${I.qNo(q.id)}</span> <span class="qtitle">${esc(q.text)}</span></div>
           <div class="choices">${keys.map((k) => `<label class="choice"><input type="radio" name="ans.${q.id}" value="${k}"${String(S.intake.answers[q.id]) === k ? ' checked' : ''}><span><span class="lvl">${k}</span>${esc(q.opts[k])}</span></label>`).join('')}</div>${factBlock(q)}</div>`;
       }).join('')}</div>
       ${S.showMissing && !done(sec) ? '<div class="notice warn">這一段還有題目未回答（標示為黃色）。</div>' : ''}
