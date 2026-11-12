@@ -7042,6 +7042,8 @@ window.EKO_LOG = (function () {
     d.app = 'eko-demo'; d.sid = sid; d.seq = ++seq; d.ev = ev; d.t = new Date().toISOString();
     d.page = location.pathname.split('/').pop() || 'index.html'; // 哪個網頁送的：收件程式依此分頁（Maggie 11/11：「可以分兩個工作頁嗎」）
     d.device = (/Mobi|Android|iPhone|iPad/.test(navigator.userAgent) ? '手機或平板' : '電腦') + ' ' + window.innerWidth + 'px';
+    // 瀏覽器時區（例 Europe/London、Asia/Taipei），分辨國外填寫者；接在「裝置」欄後面，收件程式不用改（Maggie 11/12：「好喔家時區」）
+    try { d.device += '｜' + (Intl.DateTimeFormat().resolvedOptions().timeZone || '時區不明'); } catch (_) { d.device += '｜時區不明'; }
     d.data = extra || {};
     if (S && S.intake && ev !== '換頁') d.data.intake = S.intake;
     var body = JSON.stringify(d);
