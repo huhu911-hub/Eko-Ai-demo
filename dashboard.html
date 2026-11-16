@@ -7452,6 +7452,10 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       name: p.name || '（未填公司名稱）', nm: (c) => D.ELEMENTS[elOf[c]].name, ky: !!p._ky, twRev: p.twRevenue };
   }
   const dfmt = (v, d = 1) => (v == null ? '—' : Number(v).toLocaleString('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }));
+  // 11/13 Maggie：大數字用億、萬（例 33億9,463萬、1,332萬7,087），不用自己數位數；full＝萬以下也寫出來，否則只到萬
+  const dwan = (v, full = true) => { if (v == null) return '—'; const n = Math.round(Number(v)), a = Math.abs(n); if (a < 10000) return n.toLocaleString('zh-TW');
+    const yi = Math.floor(a / 1e8), w = Math.floor((a % 1e8) / 1e4), r = a % 1e4, f = (x) => x.toLocaleString('zh-TW');
+    return (n < 0 ? '−' : '') + (yi ? f(yi) + '億' : '') + (w ? f(w) + '萬' : (yi && full && r ? '零' : '')) + (full && r ? f(r) : ''); };
   function dbar(label, v, max, color, txt) { return `<div class="brow"><span class="bn">${esc(label)}</span><span class="bt"><span style="width:${v == null ? 0 : Math.max(0, Math.min(100, (v / max) * 100))}%;background:${color}"></span></span><span class="bv">${txt}</span></div>`; }
   function dashRadar(x) {
     const W = 440, C = W / 2, R = 140, N = DASH_ORDER.length;
@@ -7613,7 +7617,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     if (ci.v != null) {
       const sure = /^已算/.test(ci.st);
       return `<p style="font-size:20px"><b>${f(ci.v)} 噸 CO₂e／每百萬元營收</b></p>
-        <p>${sure ? `同產業 ${ci.n} 家中第 ${ci.rank} 低（排放強度越低越好）；同業中位 ${dfmt(ci.med, 2)}` : `暫定：${esc(ci.st.replace(/^暫定（|）$/g, ''))}，數字待核對，暫不排名`}</p>${foot(ci.scope === '母公司' ? '母公司個體' : '合併', ci.rev)}`;
+        <p${sure ? ' style="background:var(--accent-soft);border-left:3px solid var(--accent);padding:6px 10px;border-radius:6px"' : ''}>${sure ? `同產業 ${ci.n} 家中第 ${ci.rank} 低（排放強度越低越好）；同業中位 ${dfmt(ci.med, 2)}` : `暫定：${esc(ci.st.replace(/^暫定（|）$/g, ''))}，數字待核對，暫不排名`}</p>${foot(ci.scope === '母公司' ? '母公司個體' : '合併', ci.rev)}`;
     }
     if (/^不列入/.test(ci.st)) {
       const tw = Number(String(x.twRev || '').replace(/,/g, ''));
@@ -7638,9 +7642,9 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
   function dashP4(x) {
     const p = x.pub;
     if (!p) return '<div class="warnbox">這家公司不在 1,211 家上市櫃公司的公開資料內，沒有碳排資料可以帶入。</div>';
-    const c = p.co2, own = c.s1 != null && c.s2 != null ? c.s1 + c.s2 : null, t = (v) => (v == null ? '未申報' : dfmt(v, 1) + ' 噸');
+    const c = p.co2, own = c.s1 != null && c.s2 != null ? c.s1 + c.s2 : null, t = (v) => (v == null ? '未申報' : (v >= 10000 ? dwan(v) : dfmt(v, 1)) + ' 噸');
     const FEE = {
-      pay: [`約 NT$ ${c.fee != null ? c.fee.toLocaleString('zh-TW') : '—'} 元`, `依環境部 113 年度列管排放量逐廠計算：每一廠的年排放量扣 2.5 萬噸後，乘以每噸 300 元一般費率（費率查證日 ${DASH_FEE_DATE}）。`],
+      pay: [`約 NT$ ${c.fee != null ? dwan(c.fee, false) : '—'} 元`, `依環境部 113 年度列管排放量逐廠計算：每一廠的年排放量扣 2.5 萬噸後，乘以每噸 300 元一般費率（費率查證日 ${DASH_FEE_DATE}）。`],
       under: ['目前預估不需繳碳費', `已列管 ${c.regN} 廠，但依環境部 113 年資料，各廠排放都未達 2.5 萬噸收費門檻。`],
       none: ['目前預估不需繳碳費', '依環境部 113 年資料，台灣各廠未達 2.5 萬噸門檻，目前預估不需繳碳費。'],
       check: ['待確認', '公司申報的範疇一＋二達 2.5 萬噸以上，但公司統編不在環境部列管名單（可能是海外排放、台灣子公司另有統編，或台灣各廠都未達單廠 2.5 萬噸），EKO 正在逐家確認。'],
@@ -7658,8 +7662,8 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     const tile = (l, v, s) => `<div class="kpi"><div class="kl">${l}</div><div class="kv" style="font-size:20px">${v}</div><div class="ks">${s}</div></div>`;
     const tot = (c.s1 || 0) + (c.s2 || 0) + (c.s3 || 0);
     const scope = [['範疇一', c.s1, 'var(--bad)'], ['範疇二', c.s2, 'var(--mid)'], ['範疇三', c.s3, 'var(--accent)']];
-    return `<div class="kpis">${tile('自身排放（範疇一＋二）', own == null ? '未申報' : dfmt(own, 1) + ' 噸', '證交所永續資料（114 報告年度）')}
-        ${tile('台灣列管', c.regN ? `是，${c.regN} 廠` : '否', c.regN ? `列管廠合計 ${dfmt(c.regT, 0)} 噸（環境部 113 年度）` : '不在環境部公告的列管名單內')}
+    return `<div class="kpis">${tile('自身排放（範疇一＋二）', own == null ? '未申報' : dwan(own) + ' 噸', '證交所永續資料（114 報告年度）')}
+        ${tile('台灣列管', c.regN ? `列管 ${c.regN} 廠` : '未列管', c.regN ? `${c.regN} 廠合計 ${dwan(c.regT)} 噸（環境部 113 年度）` : '不在環境部公告的列管名單內')}
         ${tile('碳費', FEE[0], '碳費收費辦法第 5 條・每廠扣 2.5 萬噸')}
         ${tile('排放數字經第三方驗證', c.ver === '是' ? '是' : c.ver === '否' ? '否' : '—', c.ver === '是' ? '已取得第三方驗證（依申報）' : c.ver === '否' ? '公司自行盤查，未經第三方查驗' + (c.verNote ? '：' + esc(c.verNote) : '') : '資料查無')}</div>
       <div class="g2"><div class="dc"><h3>碳排結構</h3><p class="dh">範疇一＝自有排放、範疇二＝外購電力、範疇三＝供應鏈・證交所永續資料・單位 噸 CO₂e${c.bound ? `・申報範圍：${esc(c.bound)}` : ''}</p>
@@ -7722,16 +7726,16 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     if (c.feeState === 'pay') {
       const ded = c.regT - c.charge;
       return `<svg viewBox="0 0 ${W} 52" style="width:100%;display:block" role="img" aria-label="碳費試算">${bar(8, [[ded, 'var(--faint)'], [c.charge, 'var(--bad)']], c.regT)}</svg>
-        <div class="lg"><span><i style="background:var(--faint)"></i>各廠扣除 2.5 萬噸：${dfmt(ded, 0)} 噸</span><span><i style="background:var(--bad)"></i>收費排放量：${dfmt(c.charge, 0)} 噸</span></div>
-        <table class="dtb" style="margin-top:8px"><tbody><tr><td>台灣列管排放（${c.regN} 廠，113 年度）</td><td>${dfmt(c.regT, 0)} 噸</td></tr><tr><td>− 每廠扣 2.5 萬噸（未達的廠整廠不收）</td><td>${dfmt(ded, 0)} 噸</td></tr>
-          <tr><td>＝ 收費排放量</td><td>${dfmt(c.charge, 0)} 噸</td></tr><tr><td>× 一般費率</td><td>每噸 300 元</td></tr><tr><td><b>＝ 預估碳費</b></td><td><b>NT$ ${c.fee.toLocaleString('zh-TW')} 元</b></td></tr></tbody></table>`;
+        <div class="lg"><span><i style="background:var(--faint)"></i>各廠扣除 2.5 萬噸：${dwan(ded)} 噸</span><span><i style="background:var(--bad)"></i>收費排放量：${dwan(c.charge)} 噸</span></div>
+        <table class="dtb" style="margin-top:8px"><tbody><tr><td>台灣列管排放（${c.regN} 廠，113 年度）</td><td>${dwan(c.regT)} 噸</td></tr><tr><td>− 每廠扣 2.5 萬噸（未達的廠整廠不收）</td><td>${dwan(ded)} 噸</td></tr>
+          <tr><td>＝ 收費排放量</td><td>${dwan(c.charge)} 噸</td></tr><tr><td>× 一般費率</td><td>每噸 300 元</td></tr><tr><td><b>＝ 預估碳費</b></td><td><b>NT$ ${dwan(c.fee)} 元</b></td></tr></tbody></table>`;
     }
     const own = c.feeState === 'under' ? c.regT : (c.s1 != null && c.s2 != null ? c.s1 + c.s2 : null);
     if (own == null) return '<p class="note">範疇一、二未申報，無法試算。</p>';
     const max = Math.max(own, 25000) * 1.15, sx = 10 + (25000 / max) * (W - 20);
     return `<svg viewBox="0 0 ${W} 86" style="width:100%;display:block" role="img" aria-label="排放與門檻">${bar(10, [[own, c.feeState === 'check' ? 'var(--mid)' : 'var(--accent)']], max)}
         <line x1="${sx.toFixed(1)}" y1="2" x2="${sx.toFixed(1)}" y2="52" stroke="var(--bad)" stroke-width="3" stroke-dasharray="8 5"/><text x="${sx.toFixed(1)}" y="78" font-size="22" fill="var(--bad)" text-anchor="middle">單廠門檻 2.5 萬噸</text></svg>
-      <p class="note">${c.feeState === 'under' ? `長條＝${c.regN} 個列管廠的合計 ${dfmt(own, 0)} 噸；門檻是逐廠比，每一廠都未達 2.5 萬噸，所以不收費。` : `長條＝申報的範疇一＋二 ${dfmt(own, 0)} 噸（${esc(c.bound || '申報範圍')}）。碳費依台灣每一廠分別比 2.5 萬噸，申報合計不等於單廠排放。`}</p>`;
+      <p class="note">${c.feeState === 'under' ? `長條＝${c.regN} 個列管廠的合計 ${dwan(own)} 噸；門檻是逐廠比，每一廠都未達 2.5 萬噸，所以不收費。` : `長條＝申報的範疇一＋二 ${dwan(own)} 噸（${esc(c.bound || '申報範圍')}）。碳費依台灣每一廠分別比 2.5 萬噸，申報合計不等於單廠排放。`}</p>`;
   }
   function dashEnergy(x) {   // 節能潛力：自身排放的電力占比（公開資料）＋產業別「哪裡耗能、哪裡動得了」（Howard 填寫表）
     const c = x.pub.co2, e = (dashData()._energy || {})[x.pub.ind];
