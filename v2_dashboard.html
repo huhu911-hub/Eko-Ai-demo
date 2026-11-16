@@ -7585,24 +7585,6 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     return `<div class="dc"><h3>② 三種商模各自的下一步</h3><p class="dh">點上方分頁切換；每一種依它在 1,211 家中的級距，取三構面建議表對應的那一格</p><div class="p3tabs">${tabs}</div>${panes}</div>`;
   }
   window.dashTab = (b) => { const w = b.closest('.dc'); w.querySelectorAll('.p3tab').forEach((e) => e.classList.toggle('on', e === b)); w.querySelectorAll('.p3pane').forEach((e) => { e.hidden = e.dataset.t !== b.dataset.t; }); };
-
-  // v2（Maggie 11/13）：報告裡點選「最想達成的創新成果」。依據＝Chou (2023) 博士論文假設 4 檢定結果（附錄假設表，PDF 第 186–187 頁）台灣樣本：
-  //   新產品特性、新產品市場：三種商模都支持；新產品銷售：只有成本重組支持（英國樣本三種都支持）。不改配比與級距。
-  function dashGoal(x, lvl) {
-    const a = x.ans;
-    const G = [['feature', '讓新產品的品質與功能優於同業', 'Q34', 'F 產品特性', ['NPDBM', 'CRBM', 'NMPBM']],
-      ['market', '讓新產品打進新的市場或客群', 'Q35', 'M 市場創新', ['NPDBM', 'CRBM', 'NMPBM']],
-      ['sales', '提高新產品帶來的營收', 'Q36', 'S 銷售表現', ['CRBM']]];
-    const tabs = G.map(([k, l]) => `<button type="button" class="p3tab" data-t="${k}" onclick="dashTab(this)" style="--tc:var(--accent)"><b>${l}</b></button>`).join('');
-    const panes = G.map(([k, l, q, fl, rel]) => `<div class="p3pane" data-t="${k}" hidden>
-        <p>您在第 ${I.qNo(q)} 題（${fl}）自評 ${a[q] == null ? '<span class="miss">未答</span>' : `<b>${a[q]} 分</b>：${esc(window.ENGINE.QUESTIONS.find((z) => z.id === q).opts[String(a[q])] || '')}`}。</p>
-        <p><b>論文發現（台灣樣本）：</b>${rel.length === 3 ? '三種商模都與這項成果有正向關係，沒有特別偏重哪一種；可對照下面三種商模各自的位置與下一步。' : '只有「成本重組」與這項成果有正向關係（英國樣本則三種商模都有）。'}</p>
-        <div class="navrow" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:6px">${rel.map((t) => `<button type="button" class="btn small ghost" onclick="dashGoTab('${t}')">${DASH_TN[t][0]}｜${esc(lvl[t][1].split(' ')[0])}：看下一步</button>`).join('')}</div>
-        <p class="note">研究結果是群體的統計關係，不代表貴公司一定如此。出處：Chou（2023）University of Strathclyde 博士論文，假設 4 檢定結果（附錄假設表）。</p></div>`).join('');
-    return `<div class="dc"><h3>③ 依您最想達成的創新成果看</h3><p class="dh">點選一項；不影響上方的配比與級距</p><div class="p3tabs">${tabs}</div>
-      <div class="p3pane" data-t="" style="padding:10px 2px"><p class="note" style="margin:0">請點選上方一項。</p></div>${panes}</div>`;
-  }
-  window.dashGoTab = (t) => { const b = document.querySelector('.p3tabs .p3tab[data-t="' + t + '"]'); if (b) { b.click(); b.closest('.dc').scrollIntoView({ block: 'start', behavior: 'smooth' }); } };
   function dashP3(x) {   // 三構面建議表 12 組（Howard 填寫表）：每個構面依配比在 1,211 家中的百分位取對應級距那一格
     const A = dashData()._advice, cut = dashData()._cut, a = x.ans;
     const LV = ['明顯落後 0–25%', '略低於同業 25–50%', '略優於同業 50–75%', '明顯領先 75–100%'];
@@ -7620,8 +7602,8 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
         <div class="g3" style="margin-top:8px">${order.map((t) => `<div><h4 style="color:${DASH_TN[t][1]};font-size:14px;margin:8px 0 4px">${DASH_TN[t][0]}｜${lvl[t][1]}</h4><p>${esc(A[t][lvl[t][1]]['這個位置代表什麼'])}</p></div>`).join('')}</div></div>
       ${dashP3Tabs(x, A, lvl, order)}
       <div class="dc"><h3>創新績效佐證 F／M／S</h3><p class="dh">第 34–36 題・1–5 分・依您的問卷作答</p>${fms.map(([q, l]) => dbar(l, a[q], 5, 'var(--accent)', a[q] == null ? '未答' : a[q] + ' 分')).join('')}
-        <p class="note">與上方三構面配比互為對照：配比是資源投入的方向，F／M／S 是新產品實際成果的自評。</p></div>
-      ${dashGoal(x, lvl)}
+        <p class="note">與上方三構面配比互為對照：配比是資源投入的方向，F／M／S 是新產品實際成果的自評。</p>
+        <p class="note">論文（台灣樣本）：跟新產品銷售（S）有關的是「成本重組」；品質（F）與打進市場（M）則三種商模都有關。出處：Chou（2023）博士論文，假設 4 檢定結果。</p></div>
       <p class="note">建議內容：EKO 三構面建議表（3 構面 × 4 級距＝12 組）。級距＝配比在 1,211 家中的百分位，不等於經營績效或優劣判斷。</p>`;
   }
   const DASH_GLOSS = `<div class="dc"><h3>名詞解釋</h3><p class="dh">本頁出現的專有名詞</p><table class="dtb"><tbody>${[
