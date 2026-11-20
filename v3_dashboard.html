@@ -9704,7 +9704,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     if (document.getElementById('demo-ov')) return;
     const ov = document.createElement('div'); ov.id = 'demo-ov';
     ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:16px';
-    ov.innerHTML = '<div style="position:relative;max-width:min(1100px,100%);max-height:100%"><video src="EKO_操作示範_v3_20261119.mp4" controls autoplay playsinline aria-label="EKO AI 操作示範" style="display:block;max-width:100%;max-height:88vh;border-radius:10px;background:#000"></video><span id="demo-x" role="button" aria-label="關閉" style="position:absolute;top:-14px;right:-6px;width:34px;height:34px;border-radius:50%;background:#fff;color:#111;font-size:22px;line-height:34px;text-align:center;cursor:pointer">×</span></div>';
+    ov.innerHTML = '<div style="position:relative;max-width:min(1100px,100%);max-height:100%"><video src="EKO_操作示範_v3_20261120.mp4" controls autoplay playsinline aria-label="EKO AI 操作示範" style="display:block;max-width:100%;max-height:88vh;border-radius:10px;background:#000"></video><span id="demo-x" role="button" aria-label="關閉" style="position:absolute;top:-14px;right:-6px;width:34px;height:34px;border-radius:50%;background:#fff;color:#111;font-size:22px;line-height:34px;text-align:center;cursor:pointer">×</span></div>';
     const close = () => { ov.remove(); document.removeEventListener('keydown', esc); };
     const esc = (e) => { if (e.key === 'Escape') close(); };
     ov.addEventListener('click', (e) => { if (e.target === ov || e.target.id === 'demo-x') close(); });
