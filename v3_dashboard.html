@@ -128,7 +128,7 @@ button { font: inherit; cursor: pointer; color: inherit; }
 .fineprint { color: var(--faint); font-size: 12px; padding-block: 16px 40px; }
 /* 11/20 Maggie：13 吋筆電一進首頁，一個畫面看完標題、說明、告知同意、按鈕與四個步驟；「只要調間距」，字級不動（只在螢幕高度 ≤ 1000px 的電腦套用；大螢幕不變） */
 .hero .consent-line { margin: 0; color: var(--faint); font-size: 12px; } /* 11/20 Maggie：字級跟頁尾「這是初步評估…」一樣 */
-.hero .consent-line p { margin: 0 0 6px; }
+.hero .consent-line p { margin: 0 0 6px; max-width: calc(50vw - 90px); } /* 11/20 Maggie 改寫文字（拿掉括號），一行顯示；螢幕較窄時才換行，避免壓到右邊綠色球體 */
 .hero .consent-line label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .hero .consent-line .need { color: var(--bad); margin: 6px 0 0; }
 @media (min-width: 761px) and (max-height: 1000px) {
@@ -7762,7 +7762,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       account: 'No account is needed for this demo. Your assessment and report stay in this browser; select "Try it Free" to begin.' },
   };
   // 11/20 外部測試：開始填寫前的告知同意（Maggie 核定文字）。勾選後才能進入公司資料與問卷；同意紀錄存在 intake.consent，隨填寫紀錄送出
-  const START_CONSENT = { zh: '您在 EKO AI 填寫的內容（包含公司資料與問卷作答）會被記錄，僅用於 EKO 的研究與產品改善，不會對外公開，也不會提供給第三方。', en: 'What you enter in EKO AI (company details and questionnaire answers) is recorded and used only for EKO research and product improvement. It will not be made public or shared with third parties.' };
+  const START_CONSENT = { zh: '您在 EKO AI 填寫的內容會被記錄，僅用於 EKO 的研究與產品改善，不會對外公開，也不會提供給第三方。', en: 'What you enter in EKO AI (company details and questionnaire answers) is recorded and used only for EKO research and product improvement. It will not be made public or shared with third parties.' };
   const START_CONSENT_OK = { zh: '我已了解並同意', en: 'I understand and agree' };
   const consented = () => !!(S.intake.consent && S.intake.consent.agreed);
   function consentBox() {
