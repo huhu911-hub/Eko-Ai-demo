@@ -7312,6 +7312,9 @@ window.EKO_LOG = (function () {
     try { d.device += '｜' + (Intl.DateTimeFormat().resolvedOptions().timeZone || '時區不明'); } catch (_) { d.device += '｜時區不明'; }
     d.data = extra || {};
     if (S && S.intake && ev !== '換頁') d.data.intake = S.intake;
+    // 11/20 外部測試資料收集：附上每個欄位的代碼、中文名稱、原始值、中文內容（收件程式寫進「v3bridge_dashboard」分頁，每位填寫者一列）
+    if (d.data.intake && window.EKO_FIELDS) { try { d.fields = window.EKO_FIELDS.list(d.data.intake); } catch (_) { d.fields = null; } }
+    d.ver = 'v3 2026-11-20（含 M1、填答欄位紀錄）';
     var body = JSON.stringify(d);
     try { if (navigator.sendBeacon && navigator.sendBeacon(URL, new Blob([body], { type: 'text/plain' }))) return; } catch (_) {}
     try { fetch(URL, { method: 'POST', mode: 'no-cors', keepalive: true, headers: { 'Content-Type': 'text/plain' }, body: body }); } catch (_) {}
@@ -7492,6 +7495,94 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
   const P_TOPSHARE = [["10-25%", "10-25%"], ["25-40%", "25-40%"], ["40-50%", "40-50%"], ["50% 以上", "50% 以上"]];
   const P_NPROD = [["1 項", "1 項"], ["2 項", "2 項"], ["3 項以上", "3 項以上"]];
   const P_SALESREG = [["台灣", "台灣"], ["中國", "中國"], ["美國", "美國"], ["歐洲", "歐洲"], ["日本", "日本"], ["東南亞", "東南亞"], ["其他", "其他"]];
+  // ---------------- 填答欄位清單（11/20：外部測試資料收集，之後交給外包廠商匯入資料庫） ----------------
+  // 每個欄位：k＝固定欄位代碼（廠商匯入用，不要改名）、label＝中文名稱、opts＝選項代碼與文字。list() 依清單取值；清單沒有的欄位也照代碼列出，不會漏。
+  const FIELD_SCHEMA = (() => {
+    const F = [];
+    const add = (k, label, opts, multi) => F.push({ k, label, opts: opts || null, multi: !!multi });
+    const o2 = (xs) => xs.map((x) => [String(x[0]), String(x[1])]);
+    const YN = [['yes', '是'], ['no', '否'], ['unknown', '不確定']];
+    const TF = [['true', '是'], ['false', '否']];
+    // 公司資料
+    add('profile.taxId', '公司統編／股票代號'); add('profile.name', '公司名稱');
+    add('profile.industry', '產業', o2(I.INDUSTRIES)); add('profile.industryOther', '其他產業');
+    add('profile.region', '總部所在國家', o2(I.REGIONS)); add('profile.regionOther', '其他國家');
+    add('profile.size', '公司規模', o2(I.SIZES)); add('profile.founded', '成立年份'); add('profile.products', '主要產品或服務');
+    add('profile.twRevenue', '台灣營運的營業收入（114 年度，千元）'); add('profile.revenue', '年營業額', P_REVENUE);
+    add('profile.respondent', '受訪者職位', P_RESP); add('profile.respondentOther', '其他職位');
+    add('profile.rdRatio', '研發投入比', P_RD); add('profile.operatingMargin', '營業利益率（近三年平均）', P_OPM);
+    add('profile.patents', '近三年發明專利件數', P_PAT); add('profile.overseas', '海外營收占比', P_OVERSEAS);
+    add('profile.productCount', '主要產品／服務項數', P_NPROD); add('profile.salesRegions', '主要銷售地區', P_SALESREG, true); add('profile.salesRegionsOther', '其他銷售地區');
+    add('profile.bigCust', '有沒有占營收 10% 以上的客戶', P_BIGCUST); add('profile.bigCustShare', '這些客戶合計占營收', P_CRSHARE);
+    add('profile.bigCustN', '這類客戶家數', P_CUSTN); add('profile.bigCustTop', '最大客戶占營收', P_TOPSHARE);
+    add('profile.focus', '最主要的競爭方式', o2(I.FOCUS));
+    add('profile._prefillFor', '系統：用哪個統編或代號自動帶入'); add('profile._prefill', '系統：自動帶入的欄位', null, true); add('profile._prefillMiss', '系統：自動帶入查無'); add('profile._ky', '系統：KY 公司註記');
+    // 37 題與附帶題
+    E.QUESTIONS.forEach((q) => {
+      add('answers.' + q.id, `第 ${I.qNo(q.id)} 題：${q.text}`, Object.keys(q.opts || {}).map((k) => [k, q.opts[k]]));
+      if (q.fact) add('facts.' + q.id, `第 ${I.qNo(q.id)} 題附帶題：${q.fact.text}`, Object.keys(q.fact.opts || {}).map((k) => [k, q.fact.opts[k]]), q.fact.multi);
+    });
+    // 創新目標與市場變化
+    add('goals.ipPrimary', '最優先的創新成果', o2(I.IP_GOALS)); add('goals.ipSecondary', '次要的創新成果', o2(I.IP_GOALS));
+    add('goals.horizon', '希望在多久內達成', o2(I.HORIZONS)); add('goals.target', '具體目標');
+    add('goals.lastRound', '上一輪創新計畫有沒有達到預期', o2(I.LAST_ROUND)); add('goals.sca', '競爭優勢來源', o2(I.SCA_SOURCES), true);
+    I.SIGNAL_TYPES.forEach(([k, n]) => {
+      const b = `signals.${k}.`, p = `市場變化「${n}」｜`;
+      add(b + 'on', p + '有這個變化', TF); add(b + 'text', p + '發生了什麼'); add(b + 'source', p + '資訊來源', o2(I.SIGNAL_SOURCES));
+      add(b + 'criteria', p + '影響範圍', o2(D.CRITERIA), true); add(b + 'key', p + '影響主要客戶', TF); add(b + 'ip', p + '影響最優先的創新成果', TF); add(b + 'sca', p + '影響競爭優勢來源', TF);
+    });
+    // 永續與能源（Bridge）
+    BI.CHALLENGES.forEach(([sc, n]) => {
+      const b = `sustain.challenges.${sc}.`, p = `外部要求「${n}」｜`;
+      add(b + 'on', p + '有這項要求或壓力', TF); add(b + 'reqs', p + '對方具體要求', BI.REQUIREMENTS.map((r) => [r[0], r[1]]), true);
+      add(b + 'offset', p + '是否接受用碳權抵換', o2(BI.OFFSET)); add(b + 'text', p + '簡短說明'); add(b + 'source', p + '資訊來源', o2(I.SIGNAL_SOURCES));
+      add(b + 'hard', p + '做不到會失去資格、受罰或無法進入市場', YN); add(b + 'applies', p + '確定適用於貴公司', YN); add(b + 'date', p + '文件或公告日期');
+    });
+    BI.RESOURCES.forEach(([fn, n]) => { add(`sustain.items.${fn}.on`, `現有資源「${n}」｜有`, TF); add(`sustain.items.${fn}.status`, `現有資源「${n}」｜狀態`, o2(BI.RESOURCE_STATUS)); });
+    add('sustain.inventory', '已完整盤點能源與碳相關資源', YN);
+    BI.PROFILE.forEach(([k, n]) => add('sustain.profile.' + k, `營運條件：${n}`, YN));
+    // 公司自己的需求與營運問題（M1）
+    const MX = window.M1, FNS = Object.keys(MX.FN).map((f) => [f, MX.FN[f]]);
+    [0, 1].forEach((i) => {
+      const b = `m1.needs.${i}.`, p = `公司自己的需求第 ${i + 1} 項｜`;
+      add(b + 'on', p + '有', TF); add(b + 'kind', p + '類型', MX.KIND); add(b + 'demand', p + '最接近的變化', Object.keys(D.DEMANDS).map((k) => [k, D.DEMANDS[k].name]));
+      add(b + 'text', p + '簡短說明'); add(b + 'site', p + '廠區或據點'); add(b + 'process', p + '製程或用途'); add(b + 'horizon', p + '期限'); add(b + 'scale', p + '規模');
+      add(b + 'source', p + '資訊來源', o2(I.SIGNAL_SOURCES)); add(b + 'date', p + '文件或決議日期'); add(b + 'fns', p + '打算用哪些方式處理', FNS, true); add(b + 'fdoc', p + '能提供文件證明適用', YN);
+    });
+    [0, 1].forEach((i) => {
+      const b = `m1.ops.${i}.`, p = `營運問題第 ${i + 1} 項｜`;
+      add(b + 'on', p + '有', TF); add(b + 'rclass', p + '類型', MX.RCLASS.map((r) => [r[0], r[1]])); add(b + 'text', p + '簡短說明');
+      add(b + 'site', p + '廠區或據點'); add(b + 'process', p + '製程或用途'); add(b + 'horizon', p + '期限'); add(b + 'scale', p + '規模');
+      add(b + 'shortfall', p + '已確認確實有缺口', YN); add(b + 'source', p + '資訊來源', o2(I.SIGNAL_SOURCES)); add(b + 'date', p + '紀錄或報告日期');
+      add(b + 'fns', p + '還考慮哪些方式', FNS, true); add(b + 'fdoc', p + '能提供文件證明適用', YN);
+    });
+    BI.CHALLENGES.forEach(([sc, n]) => ['site', 'process', 'horizon', 'scale'].forEach((f) => add(`m1.scope.${sc}.${f}`, `外部要求「${n}」的範圍｜${{ site: '廠區或據點', process: '製程或用途', horizon: '期限', scale: '規模' }[f]}`)));
+    // 能力・資源・活動與投入條件
+    Object.keys(D.CONSTRUCTS).forEach((k) => add('cra.' + k, `能力・資源・活動：是否${I.CRA_ASK[k] || D.CONSTRUCTS[k].name}`, o2(I.CRA_OPTIONS)));
+    add('feas.E', '強化現有商模：未來 12–24 個月有足夠預算、人力與時間', o2(I.FEAS_OPTIONS));
+    add('feas.T', '較大幅度改變商模：有足夠預算、人力與時間', o2(I.FEAS_OPTIONS));
+    add('feas.pilot', '能先支應小規模試辦', o2(I.FEAS_OPTIONS));
+    return F;
+  })();
+  function fieldGet(obj, path) { return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
+  function fieldText(f, v) {
+    if (v == null || v === '') return '';
+    const one = (x) => { const m = f.opts && f.opts.find((o) => o[0] === String(x)); return m ? m[1] : String(x); };
+    return Array.isArray(v) ? v.map(one).join('、') : one(v);
+  }
+  function fieldList(intake) {
+    const out = [], seen = new Set();
+    FIELD_SCHEMA.forEach((f) => { seen.add(f.k); const v = fieldGet(intake, f.k); if (v == null || v === '' || (Array.isArray(v) && !v.length)) return;
+      out.push([f.k, f.label, Array.isArray(v) ? v.join('|') : String(v), fieldText(f, v)]); });
+    // 清單沒有的欄位（例如之後新增的題目）也照代碼列出，不會漏
+    (function walk(o, pre) { Object.keys(o || {}).forEach((k) => { const p = pre ? pre + '.' + k : k, v = o[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) return walk(v, p);
+      if (seen.has(p) || v == null || v === '' || (Array.isArray(v) && !v.length)) return;
+      out.push([p, p, Array.isArray(v) ? v.map((x) => (typeof x === 'object' ? JSON.stringify(x) : x)).join('|') : String(v), Array.isArray(v) ? v.join('、') : String(v)]); }); })(intake, '');
+    return out;
+  }
+  window.EKO_FIELDS = { list: fieldList, schema: () => FIELD_SCHEMA.map((f) => ({ k: f.k, label: f.label, multi: f.multi, opts: f.opts })) };
+
   // 輸入統編／股票代號 → 帶入公開資料（Maggie 11/04）。資料在 <script id="eko-prefill">，沒有就不帶
   const PREFILL_LABEL = { name: '公司名稱', industry: '產業', region: '總部所在國家', revenue: '年營業額', rdRatio: '研發投入比', operatingMargin: '營業利益率', patents: '近三年發明專利件數', productCount: '主要產品／服務項數', bigCust: '有沒有占營收 10% 以上的客戶', bigCustShare: '10% 以上客戶合計占營收', bigCustN: '10% 以上客戶家數', bigCustTop: '最大客戶占營收', overseas: '海外營收占比', founded: '成立年份', products: '主要產品或服務', salesRegions: '主要銷售地區', salesRegionsOther: '其他銷售地區' };
   function prefillData() { if (!window.__ekoPF) { const el = document.getElementById('eko-prefill'); const d = el ? JSON.parse(el.textContent) : {}; const byCode = {}; Object.keys(d).forEach((k) => { byCode[d[k].code] = k; }); window.__ekoPF = { d, byCode }; } return window.__ekoPF; }
