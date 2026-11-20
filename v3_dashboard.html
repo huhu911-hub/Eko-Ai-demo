@@ -7043,268 +7043,571 @@ if (typeof module !== 'undefined') module.exports = DATA; else window.DATA = DAT
 </script>
 <script>
 // ---- m1.js ----
-// EKO M1 策略前瞻建議（Strategic Foresight Advice）
-// 依據：Howard M1 Logic Specification v0.3.1（2026-11-16 規格層驗收；PR #28 Draft）＋ Decision 1–8
-// 本檔由 Maggie 這邊依規格自行實作（2026-11-20），尚未與 Howard 的 m1.js（TEST-ONLY 原型）逐筆比對。
-// 原則：不重做、不修改 BMI／Bridge／Dynamic；只讀它們的輸出，在上面加一層。不產生「需要碳權」或「應購買」的選項。
+// Howard M1 Strategic Foresight Advice 原型 r3.1（PR #28 m1-test-only/m1.js），下面「原樣開始」與「原樣結束」兩行標記之間逐字未改（SHA-256 6241342f5904c02f…）。
+// 瀏覽器沒有 Node 的 require／process／module，這裡只提供替身：dynamic.js → window.DYNAMIC、data.js → window.DATA。
 (function (root) {
-  const D = root.DATA;
-  const GR = { VERIFIED: 3, SELF_REPORT_TRACEABLE: 2, SURVEY_INFERENCE: 1, NONE: 0 };
-  const GR_TEXT = { VERIFIED: '已查證', SELF_REPORT_TRACEABLE: '企業自述、可追溯', SURVEY_INFERENCE: '問卷推論', NONE: '沒有來源' };
+  const process = { env: {} };
+  const module = { exports: {} };
+  const require = (p) => (/dynamic\.js$/.test(p) ? root.DYNAMIC : /data\.js$/.test(p) ? root.DATA : (() => { throw new Error('M1 找不到模組：' + p); })());
+/* ===== 原樣開始 ===== */
+// EKO M1 Strategic Foresight Advice — logic prototype (TEST-ONLY, local, not part of any repo)
+// Wraps the existing frozen demo engines (eko @ fb66671, extracted read-only to /tmp/eko-freeze) and adds
+// M1-L1..L5 as PROPOSED logic. No engine file is modified. No LLM, no randomness.
+'use strict';
+const SRC = process.env.EKO_DEMO || '/tmp/eko-freeze/demo/customer-site/src/';
+const DY = require(SRC + 'dynamic.js');
+const BD = require(SRC + '../../bmi-advisory/src/data.js'); // read-only: demand → element table (v1.2 appendix B)
+
+const GRADE = { VERIFIED: 3, SELF_REPORT_TRACEABLE: 2, SURVEY_INFERENCE: 1, NONE: 0 };
+// r3 Decision 8 (Howard 2026-11-16, direction approved): "可提供文件" ≠ verified. VERIFIED only when a received
+// document has been checked for content, date and applicable scope. Rumour / single source and unknown
+// applicability never establish a confirmed need.
+const SOURCE_GRADE = { doc: 'SELF_REPORT_TRACEABLE', firsthand: 'SELF_REPORT_TRACEABLE', multi: 'SELF_REPORT_TRACEABLE', single: 'SURVEY_INFERENCE' };
+const SIGNAL_GRADE = { A: 'SELF_REPORT_TRACEABLE', B: 'SELF_REPORT_TRACEABLE', C: 'SURVEY_INFERENCE' };
+function checkedOK(c) { return !!(c && c.received && c.content && c.date && c.scope); }
+// r3.1 Decision 8 (Howard 2026-11-16 16:26): a VALIDATED label on function or mapping evidence is accepted only
+// with a traceable verification basis — source, check status, date and applicable scope.
+function verificationOK(v) { return !!(v && v.source && v.status === 'CHECKED' && v.date && v.scope); }
+function evGrade(ev) { // for internal / operational / resource evidence
+  if (!ev) return { grade: 'NONE', note: 'no evidence' };
+  if (ev.grade === 'VERIFIED' && !checkedOK(ev.checked)) return { grade: 'SELF_REPORT_TRACEABLE', note: 'declared VERIFIED but document not received or content/date/scope not checked' };
+  return { grade: ev.grade, note: ev.grade === 'VERIFIED' ? 'document received; content, date and scope checked' : '' };
+}
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const uniq = (xs) => [...new Set(xs.filter(Boolean))];
+
+// ---------------------------------------------------------------- trace helper (M1-L5)
+function tracer() {
+  const nodes = [];
+  return {
+    nodes,
+    add(n) { // {id, layer, statement, inputs[], rule, source, applicability, uncertainty, status}
+      for (const k of ['id', 'layer', 'statement', 'rule', 'status']) if (n[k] == null) throw new Error(`trace node missing ${k}`);
+      n.inputs = n.inputs || []; nodes.push(n); return n.id;
+    },
+  };
+}
+
+// ---------------------------------------------------------------- M1-L1 Strategic Need Identification
+// Three sources (D-12). Need Record per vNext R-V2-13: need_id, scope, purpose/time/scale, sources[], candidate_links[].
+function needKey(n) { return [n.site, n.process_or_use, n.purpose, n.horizon, n.scale]; }
+function sameNeed(a, b) {
+  const ka = needKey(a), kb = needKey(b);
+  if (ka.some((v) => v == null || v === '') || kb.some((v) => v == null || v === '')) return 'UNKNOWN';
+  return ka.every((v, i) => v === kb[i]) ? 'SAME' : 'DIFFERENT';
+}
+
+function identifyNeeds(input, assessment, T) {
+  const raw = [];
+  const m1 = input.m1 || {};
+  // External-Driven: sustainability / policy / supply-chain challenges that apply (Bridge B1 records)
+  for (const [code, ch] of Object.entries((input.intake.sustain || {}).challenges || {})) {
+    if (!ch.on) continue;
+    const meta = (m1.challenge_scope || {})[code] || {};
+    const id = `D-${code}`;
+    T.add({ id, layer: 'DATA', statement: ch.text, rule: 'Bridge B1 challenge record', source: `${ch.source}${ch.date ? ' ' + ch.date : ''}`, applicability: ch.applies, uncertainty: ch.applies === 'unknown' ? 'applicability unknown' : '', status: 'INPUT' });
+    if (ch.applies === 'no') continue; // recorded, not a need
+    const dc = (m1.document_checks || {})[code];
+    const g = ch.source === 'doc' && checkedOK(dc) ? 'VERIFIED' : (SOURCE_GRADE[ch.source] || 'SURVEY_INFERENCE');
+    raw.push({ type: 'External-Driven', data: id, text: ch.text, level_hint: 'enterprise', grade: g,
+      grade_note: g === 'VERIFIED' ? 'document received; content, date and scope checked' : ch.source === 'doc' ? '企業表示可提供文件（未核對）' : `source type ${ch.source}`,
+      hard: ch.hard, applies: ch.applies, reqs: ch.reqs || [], challenge: code, date: ch.date || null,
+      site: meta.site, process_or_use: meta.process_or_use, purpose: meta.purpose, horizon: meta.horizon, scale: meta.scale });
+  }
+  // External-Driven: formal market scenarios from the BMI engine (A-grade + structural criteria)
+  const scen = assessment.main.result.scenarios;
+  for (const s of scen.formal) {
+    const id = `D-SIG-${s.id}`;
+    T.add({ id, layer: 'DATA', statement: `市場訊號：${s.demandName}（${s.grade} 級）`, rule: 'BMI S3 HR-SIG-D2', source: 'enterprise questionnaire (IQ3)', applicability: 'formal scenario', uncertainty: '', status: 'INPUT' });
+    raw.push({ type: 'External-Driven', data: id, text: s.demandName, level_hint: 'enterprise', grade: SIGNAL_GRADE[s.grade] || 'SURVEY_INFERENCE', signal: s.id });
+  }
+  // Strategy-Driven: enterprise-declared internal goals (cost structure, efficiency, competitiveness)
+  for (const n of m1.internal_needs || []) {
+    const id = `D-${n.id}`;
+    T.add({ id, layer: 'DATA', statement: n.text, rule: 'M1-L1 internal need record', source: `${n.evidence.source || ''} ${n.evidence.date || ''}`.trim(), applicability: n.site || 'site unknown', uncertainty: n.evidence.grade === 'VERIFIED' ? '' : `evidence ${n.evidence.grade}`, status: 'INPUT' });
+    const eg = evGrade(n.evidence);
+    raw.push(Object.assign({ type: 'Strategy-Driven', data: id, level_hint: 'enterprise' }, n, { grade: eg.grade, grade_note: eg.note }));
+  }
+  T.add({ id: 'D-BMI-ENGINE', layer: 'DATA', statement: 'Maggie37 answers, IQ1–IQ3 goals and signals → BMI engine candidates', rule: 'BMI S1–S8 (v1.2 test rules)', source: 'enterprise questionnaire', applicability: 'enterprise', uncertainty: 'test-stage thresholds ★', status: 'INPUT' });
+  // Strategy-Driven: BMI lead candidate element changes (candidate-linked)
+  const dec = assessment.main.result.decision;
+  const lead = dec && dec.candidate ? assessment.main.result.candidates.find((c) => c.id === dec.candidate) : null;
+  if (lead && (lead.changes || []).length) {
+    const id = `D-BMI-${lead.id}`;
+    T.add({ id, layer: 'DATA', statement: `BMI 候選 ${lead.label}：元素變化 ${lead.changes.join('、')}`, rule: 'BMI S4–S5', source: 'BMI engine (v1.2 test rules)', applicability: 'candidate', uncertainty: 'test-stage rules ★', status: 'INPUT' });
+    raw.push({ type: 'Strategy-Driven', data: id, level_hint: 'candidate', candidate: lead.id, text: `${lead.label} 的元素變化`, grade: 'SURVEY_INFERENCE' });
+  }
+  // Operational-Driven: operating records
+  for (const o of m1.operations || []) {
+    const id = `D-${o.id}`;
+    T.add({ id, layer: 'DATA', statement: o.text, rule: 'M1-L1 operational record', source: `${o.evidence.source || ''} ${o.evidence.date || ''}`.trim(), applicability: o.site || 'site unknown', uncertainty: o.evidence.grade === 'VERIFIED' ? '' : `evidence ${o.evidence.grade}`, status: 'INPUT' });
+    const eg = evGrade(o.evidence);
+    raw.push(Object.assign({ type: 'Operational-Driven', data: id, level_hint: 'enterprise' }, o, { grade: eg.grade, grade_note: eg.note }));
+  }
+
+  // De-duplication (R-V2-13 vNext): merge only SAME; UNKNOWN → keep separate, flag possible duplicate
+  const needs = [];
+  for (const r of raw) {
+    const src = { type: r.type, data: r.data, grade: r.grade, grade_note: r.grade_note || '', text: r.text, hard: r.hard, applies: r.applies, challenge: r.challenge, date: r.date || (r.evidence && r.evidence.date) || null };
+    let merged = null;
+    for (const n of needs) {
+      const s = sameNeed(n, r);
+      if (s === 'SAME') { merged = n; break; }
+      if (s === 'UNKNOWN' && n.process_or_use && r.process_or_use && n.process_or_use === r.process_or_use) n.possible_duplicates = uniq([...(n.possible_duplicates || []), r.data]);
+    }
+    if (merged) {
+      merged.sources.push(src);
+      if (r.level_hint === 'enterprise') merged.enterprise_level = true;
+      if (r.candidate) merged.candidate_links.push({ candidate: r.candidate, relation: 'also_relies_on' });
+      if (r.verified_shortfall === true) merged.verified_shortfall = true;
+      if (r.resource_class && !merged.resource_class) merged.resource_class = r.resource_class;
+      if (!merged.kind && r.kind) merged.kind = r.kind;
+      continue;
+    }
+    needs.push({
+      need_id: `N${needs.length + 1}`, text: r.text, site: r.site || null, process_or_use: r.process_or_use || null,
+      purpose: r.purpose || null, horizon: r.horizon || null, scale: r.scale || null,
+      kind: r.kind || null, reqs: r.reqs || [], challenge: r.challenge || null, signal: r.signal || null,
+      resource_class: r.resource_class || null, verified_shortfall: r.verified_shortfall == null ? null : r.verified_shortfall,
+      enterprise_level: r.level_hint === 'enterprise',
+      candidate_links: r.candidate ? [{ candidate: r.candidate, relation: 'originates_from_element_change' }] : [],
+      sources: [src], possible_duplicates: [],
+    });
+  }
+  for (const n of needs) {
+    // a source with applicability 'unknown' cannot establish the need (Decision 8)
+    const usable = n.sources.filter((s) => s.applies !== 'unknown');
+    const best = usable.length ? Math.max(...usable.map((s) => GRADE[s.grade] || 0)) : 0;
+    const bestAll = Math.max(...n.sources.map((s) => GRADE[s.grade] || 0));
+    n.status = best >= GRADE.SELF_REPORT_TRACEABLE ? 'Need Identified' : 'Need Unknown';
+    n.status_note = !usable.length ? 'applicability unknown' : best < GRADE.SELF_REPORT_TRACEABLE ? 'evidence below traceable self-report' : '';
+    n.evidence_grade = Object.keys(GRADE).find((k) => GRADE[k] === bestAll);
+    n.source_types = uniq(n.sources.map((s) => s.type));
+    T.add({ id: n.need_id, layer: 'NEED', statement: `${n.status}：${n.text}`, inputs: n.sources.map((s) => s.data), rule: 'M1-L1 / R-V2-02 / R-V2-13', source: n.source_types.join('+'), applicability: [n.site, n.process_or_use].filter(Boolean).join(' / ') || 'scope unknown', uncertainty: n.status === 'Need Unknown' ? n.status_note : (n.possible_duplicates.length ? 'possible duplicate of ' + n.possible_duplicates.join(',') : ''), status: 'PROPOSED' });
+  }
+  // Enterprise Operational Resource Gap (R-V2-04 ①): verified operating shortfall, independent of Layer 2
+  const eorg = needs.filter((n) => n.verified_shortfall === true && n.sources.some((s) => s.type === 'Operational-Driven' && s.grade === 'VERIFIED'))
+    .map((n) => ({ need_id: n.need_id, text: n.text, resource_class: n.resource_class, status: 'EORG Confirmed' }));
+  return { needs, eorg };
+}
+
+// ---------------------------------------------------------------- Layer 2 function applicability (D-14; vNext §1, §9, §10)
+// Function status per (need, function): APPLICABLE / MAPPING_UNVALIDATED / CONCEPTUAL_LINK_ONLY / NOT_APPLICABLE(reason)  (vNext four states; H2 layers recorded separately)
+const REQ_FN = { data: ['F8'], renewable: ['F1', 'F6'], continuity: ['F5'], reduction: ['F7a'], efficiency: ['F4'] };
+function functionStatus(input, needs, unknownsRaw, T) {
+  // H2 (Howard 2026-11-16 direction): four separate layers per (need, function)
+  //   explicit_requirement  : NAMED / NOT_NAMED        — does an external requirement name the function?
+  //   enterprise_applicability: CONFIRMED / UNKNOWN / NOT_APPLICABLE — does it apply to this firm, site, product?
+  //   function_validation   : VALIDATED / NOT_APPLICABLE(reason) / PENDING — is the carbon/energy function really involved here?
+  //   mapping_validation    : VALIDATED / UNVALIDATED  — are the C/R/A → function links (Table B) validated?
+  // Status (vNext four states): APPLICABLE only when function_validation = VALIDATED (and, for requirement-derived
+  // functions, enterprise_applicability = CONFIRMED). A named requirement alone stays MAPPING_UNVALIDATED.
+  const fe = (input.m1 || {}).function_evidence || [], me = (input.m1 || {}).mapping_evidence || [];
+  const out = [];
+  const evFor = (n) => fe.filter((x) => x.need_ref === n.need_id || n.sources.some((s) => s.data === `D-${x.need_ref}`));
+  for (const n of needs) {
+    const ext = n.sources.find((s) => s.type === 'External-Driven' && s.challenge !== undefined) || n.sources.find((s) => s.type === 'External-Driven');
+    const blockedScope = unknownsRaw.some((u) => u.affects === 'need' && u.target === n.need_id);
+    const scopeKnown = !!(n.site && n.process_or_use);
+    const named = uniq(n.reqs.flatMap((r) => REQ_FN[r] || []));
+    const fns = uniq(named.concat(evFor(n).map((e) => e.function)));
+    for (const f of fns) {
+      const e = evFor(n).find((x) => x.function === f);
+      const fv = !e ? 'PENDING' : e.status === 'VALIDATED' ? (verificationOK(e.verification) ? 'VALIDATED' : 'PENDING') : e.status === 'NOT_APPLICABLE' && e.reason ? 'NOT_APPLICABLE' : e.status === 'CONCEPTUAL' ? 'CONCEPTUAL' : 'PENDING';
+      const fvNote = e && e.status === 'VALIDATED' && fv !== 'VALIDATED' ? 'VALIDATED label without traceable verification (source, CHECKED status, date, scope) — not accepted' : '';
+      const mv = me.some((m) => m.function === f && m.status === 'VALIDATED' && verificationOK(m.verification)) ? 'VALIDATED' : 'UNVALIDATED';
+      const mvNote = me.some((m) => m.function === f && m.status === 'VALIDATED' && !verificationOK(m.verification)) ? 'mapping VALIDATED label without traceable verification — not accepted' : '';
+      const reqNamed = named.includes(f);
+      // r3 Decision 3 / X6: every function (requirement-derived or endogenous) needs enterprise, site and process applicability
+      const entApp = ext && ext.applies === 'no' ? 'NOT_APPLICABLE'
+        : (!scopeKnown || blockedScope || n.status !== 'Need Identified') ? 'UNKNOWN'
+        : reqNamed ? (ext && ext.applies === 'yes' && ext.grade === 'VERIFIED' ? 'CONFIRMED' : 'UNKNOWN')
+        : (e && e.applicability_confirmed === true ? 'CONFIRMED' : 'UNKNOWN');
+      let status = 'MAPPING_UNVALIDATED';
+      if (fv === 'NOT_APPLICABLE') status = 'NOT_APPLICABLE';
+      else if (fv === 'CONCEPTUAL') status = 'CONCEPTUAL_LINK_ONLY';
+      else if (fv === 'VALIDATED' && entApp === 'CONFIRMED') status = 'APPLICABLE';
+      const reason = status === 'NOT_APPLICABLE' ? e.reason
+        : e && e.status === 'NOT_APPLICABLE' && !e.reason ? 'exclusion without traceable reason is not accepted'
+        : status === 'MAPPING_UNVALIDATED' ? `${reqNamed ? 'named by requirement; ' : ''}enterprise applicability ${entApp}; function validation ${fv}` : (e && e.source) || '';
+      out.push({ need_id: n.need_id, fn: f, status, layers: { explicit_requirement: reqNamed ? 'NAMED' : 'NOT_NAMED', enterprise_applicability: entApp, function_validation: fv, mapping_validation: mv }, reason, verification_notes: [fvNote, mvNote].filter(Boolean), source: (e && e.source) || '' });
+    }
+  }
+  for (const o of out) T.add({ id: `L2-${o.need_id}-${o.fn}`, layer: 'FUNCTION', statement: `${o.fn}: ${o.status} (req ${o.layers.explicit_requirement}, ent ${o.layers.enterprise_applicability}, fn ${o.layers.function_validation}, map ${o.layers.mapping_validation})`, inputs: [o.need_id], rule: 'H2 four layers / D-14 / vNext §9', source: o.source || o.reason, applicability: o.need_id, uncertainty: o.status === 'APPLICABLE' ? (o.layers.mapping_validation === 'VALIDATED' ? '' : 'C/R/A mapping unvalidated') : 'function not validated', status: 'PROPOSED' });
+  return out;
+}
+
+// Bridge carbon/energy resource gap (R-V2-04 ②): only for applicable functions, only with verified resource evidence
+function resourceState(input, fnRows, T) {
+  const re = (input.m1 || {}).resource_evidence || [];
+  return fnRows.filter((f) => f.status === 'APPLICABLE').map((f) => {
+    const ev = re.filter((r) => r.function === f.fn && (!r.need_ref || r.need_ref === f.need_id)).map((r) => Object.assign({}, r, { grade: evGrade(r).grade }));
+    // R-V2-10: conflicting evidence → compare date/scope before choosing
+    let chosen = null, conflict = null;
+    const verified = ev.filter((r) => r.grade === 'VERIFIED'), others = ev.filter((r) => r.grade !== 'VERIFIED');
+    if (verified.length && others.length) {
+      const v = verified[0], o = others[0];
+      const sameScope = v.scope && o.scope && v.scope === o.scope, comparable = sameScope && v.period === o.period;
+      conflict = { verified: v, other: o, comparable, handling: comparable ? 'same scope and period: verified value used; both retained' : 'different scope or period: not a conflict; both retained for their own scope' };
+      chosen = v;
+    } else chosen = verified[0] || null;
+    let state = 'Resource Adequacy Unknown';
+    if (chosen) state = chosen.state === 'SHORTFALL' ? 'BCRG Confirmed' : chosen.state === 'ADEQUATE' ? 'Resource Adequate' : state;
+    const row = { need_id: f.need_id, fn: f.fn, state, evidence: ev.map((r) => `${r.grade}:${r.state}${r.scope ? '@' + r.scope : ''}`), conflict };
+    T.add({ id: `L2R-${f.need_id}-${f.fn}`, layer: 'RESOURCE', statement: `${f.fn}: ${state}`, inputs: [`L2-${f.need_id}-${f.fn}`], rule: 'R-V2-04 ② / R-V2-10', source: row.evidence.join('; ') || 'no verified resource evidence', applicability: f.need_id, uncertainty: state === 'Resource Adequacy Unknown' ? 'self-report/MODEL cannot confirm' : '', status: 'PROPOSED' });
+    return row;
+  });
+}
+
+// ---------------------------------------------------------------- DRU (vNext §3)
+// unknown: {id, about, affects:'need'|'function'|'resource'|'none', target, plausible_values:[{value, effect}], excluded:[{value, reason}], resolvable_from:[...]}
+function classifyUnknowns(input, needs, T, recompute) {
+  // target may name a need_id or a source record id (e.g. IN-A1, SC2); resolve to need_id
+  const resolve = (t) => { if (!t) return t; const n = needs.find((x) => x.need_id === t || x.sources.some((s) => s.data === `D-${t}`)); return n ? n.need_id : t; };
+  return ((input.m1 || {}).unknowns || []).map((u0) => {
+    const u = Object.assign({}, u0, { target: resolve(u0.target) });
+    const effects = uniq((u.plausible_values || []).map((v) => v.effect)); // descriptive only (r3: not used to classify)
+    const excludedOk = (u.excluded || []).every((x) => x.reason);
+    const vals = u.plausible_values || [];
+    const noPatch = vals.some((v) => !v.patch);
+    // r3 Decision 5: substitute each reasonable value and recompute; compare decision fingerprints
+    const prints = recompute && !noPatch ? vals.map((v) => recompute(v.patch)) : [];
+    const changes = noPatch ? null : uniq(prints).length > 1;
+    let cls = 'Disclosure', basis = 'all reasonable values give the same result (recomputed)';
+    if (!excludedOk) { cls = 'Blocking'; basis = 'value excluded without a reason'; }
+    else if (changes === null) { cls = 'Blocking'; basis = 'a value cannot be substituted (no patch) — not recomputable, treated conservatively'; }
+    else if (changes) { cls = (u.resolvable_from || []).length ? 'Blocking' : 'Critical-Query'; basis = 'recomputed results differ across reasonable values'; }
+    const row = { id: u.id, about: u.about, affects: u.affects, target: u.target, class: cls, basis, recomputed: prints.length, effects, excluded: u.excluded || [] };
+    T.add({ id: `U-${u.id}`, layer: 'UNKNOWN', statement: `${u.about}: ${cls}`, inputs: [u.target].filter(Boolean), rule: 'DRU by recomputation (Decision 5, r3)', source: basis, applicability: u.target || '', uncertainty: effects.join(' | '), status: 'PROPOSED' });
+    return row;
+  });
+}
+
+// ---------------------------------------------------------------- M1-L2 BM & competitiveness impact
+// Internal-need → element mapping is an AI (T4) mapping: always labelled Mapping Unvalidated.
+const NEED_ELEMENT_T4 = { cost: ['COS', 'TEC'], efficiency: ['TEC', 'COS'], competitiveness: [], bm_innovation: [], reliability: ['TEC'] };
+const SCA_FOR = { cost: 'cost', efficiency: 'cost', reliability: 'cost', competitiveness: null };
+function impacts(input, assessment, needs, T) {
+  const res = assessment.main.result, sca = (input.intake.goals || {}).sca || [];
+  const lead = res.decision && res.decision.candidate ? res.candidates.find((c) => c.id === res.decision.candidate) : null;
+  return needs.map((n) => {
+    const kind = n.kind || (n.signal ? n.signal.replace(/^S-/, '') : n.challenge ? 'external' : 'bm');
+    const elements = n.candidate_links.length && lead ? { values: lead.changes || [], basis: 'BMI engine S5 (v1.2 test rules)' }
+      : NEED_ELEMENT_T4[kind] ? { values: NEED_ELEMENT_T4[kind], basis: 'AI mapping (T4) — Mapping Unvalidated' } : { values: [], basis: 'not determined' };
+    const scaLink = SCA_FOR[kind] && sca.includes(SCA_FOR[kind]) ? `touches stated SCA source "${SCA_FOR[kind]}"` : sca.length ? 'no stated SCA source matched' : 'SCA objective not set';
+    const verified = n.evidence_grade === 'VERIFIED';
+    const imp = {
+      need_id: n.need_id,
+      bm_elements: elements,
+      cost_structure: /cost|efficiency|reliability/.test(kind) ? (verified ? 'affected (verified need)' : 'possibly affected (unverified)') : 'not assessed',
+      competitive_advantage: scaLink,
+      operational_risk: n.source_types.includes('Operational-Driven') ? (n.verified_shortfall ? 'verified operating shortfall' : 'risk reported, shortfall not verified') : n.reqs.includes('continuity') ? 'external continuity requirement' : 'not assessed',
+      resource_allocation: 'decided by enterprise; options compared in M1-L3',
+      certainty: verified && !/T4/.test(elements.basis) ? 'supported' : 'unverified link — not a conclusion',
+    };
+    T.add({ id: `I-${n.need_id}`, layer: 'IMPACT', statement: `BM/競爭力影響：元素 ${elements.values.join('、') || '—'}；${scaLink}`, inputs: [n.need_id], rule: 'M1-L2', source: elements.basis, applicability: n.need_id, uncertainty: imp.certainty, status: 'PROPOSED' });
+    return imp;
+  });
+}
+
+// ---------------------------------------------------------------- M1-L3 Strategic options
+function options(input, assessment, bridge, needs, fnRows, resRows, unknowns, T) {
+  const res = assessment.main.result, opts = [];
+  const add = (o) => { o.id = `OPT${opts.length + 1}`; opts.push(o); T.add({ id: o.id, layer: 'OPTION', statement: `${o.type}：${o.label}（${o.stage}）`, inputs: o.inputs, rule: o.rule, source: o.source || '', applicability: o.applicability || '', uncertainty: o.uncertainty || '', status: 'PROPOSED' }); };
+  add({ type: 'maintain', label: '維持現況（S0，在已知條件下）', stage: 'Comparable', inputs: needs.map((n) => n.need_id), rule: 'HR-S0 / D5', note: '維持不代表無風險；企業層需求仍顯示' });
+  for (const n of needs.filter((x) => x.enterprise_level && x.source_types.some((t) => t !== 'External-Driven'))) {
+    add({ type: 'operational_improvement', label: `以既有資源改善：${n.text}`, stage: n.evidence_grade === 'VERIFIED' ? 'Comparable' : 'Exploratory', inputs: [n.need_id, `I-${n.need_id}`], rule: 'M1-L3 / vNext §6', uncertainty: n.evidence_grade === 'VERIFIED' ? '' : 'need evidence below verified' });
+  }
+  for (const c of res.candidates.filter((c) => c.kind !== 'maintain')) {
+    add({ type: 'bm_adjustment', label: `${c.label}（BMI 候選；IP 適配 ${c.eval.ip.rating}；可行性 ${c.eval.feas.rating}）`, stage: c.eval.feas.rating === '可行' && c.eval.ip.rating !== '未定' ? 'Comparable' : 'Exploratory', inputs: ['D-BMI-ENGINE'], rule: 'BMI S4–S8 (v1.2 test rules)', uncertainty: 'test-stage thresholds ★' });
+  }
+  // Resource options: Bridge V1 options, re-staged under V2 (never "buy carbon credits" by default)
+  const blocking = unknowns.filter((u) => u.class !== 'Disclosure');
+  for (const f of fnRows) {
+    const r = resRows.find((x) => x.need_id === f.need_id && x.fn === f.fn);
+    const l1 = (((input.m1 || {}).l1_assessment) || {})[f.fn] || {};
+    const b67 = l1.b6 === 'pass' && l1.b7 === 'assessed_no_fatal';
+    const comparable = f.status === 'APPLICABLE' && f.layers.mapping_validation === 'VALIDATED' && r && (r.state === 'BCRG Confirmed' || r.state === 'Resource Adequate') && b67 && !blocking.some((u) => u.target === f.need_id);
+    if (f.status === 'NOT_APPLICABLE') continue;
+    const label = r && r.state === 'Resource Adequacy Unknown' ? `先查證 ${f.fn} 的既有資源（流程行動）` : `${f.fn} 資源方案（改善既有／外部能力或服務／新增，依 L1 比較）`;
+    add({ type: 'resource', label, stage: comparable ? 'Comparable' : 'Exploratory', fn: f.fn, inputs: [`L2-${f.need_id}-${f.fn}`].concat(r ? [`L2R-${f.need_id}-${f.fn}`] : []), rule: 'D-14 / vNext §6', uncertainty: comparable ? '' : `function ${f.status}; mapping ${f.layers.mapping_validation}; resource ${r ? r.state : 'not assessed'}${b67 ? '' : '; B6 rights / B7 feasibility not assessed'}` });
+  }
+  return opts;
+}
+
+// ---------------------------------------------------------------- H1 hard-requirement compliance (candidate-scoped O1)
+function requirementCompliance(needs, fnRows, resRows, eorg, unknowns, T) {
+  // r3: a declared hard requirement is tracked even when its document is not yet checked; only a checked
+  // (VERIFIED) requirement with a verified shortfall can be NOT_MET or MET.
+  const hard = needs.filter((n) => n.status === 'Need Identified' && n.sources.some((s) => s.type === 'External-Driven' && s.hard === 'yes' && s.applies === 'yes'));
+  return hard.map((n) => {
+    const appUnknown = unknowns.some((u) => u.class !== 'Disclosure' && u.affects === 'need' && u.target === n.need_id);
+    const rows = fnRows.filter((f) => f.need_id === n.need_id), res = resRows.filter((r) => r.need_id === n.need_id);
+    const reqVerified = n.sources.some((s) => s.type === 'External-Driven' && s.hard === 'yes' && s.applies === 'yes' && s.grade === 'VERIFIED');
+    let status = 'UNDETERMINED', basis = 'resource state not verified';
+    if (appUnknown) { status = 'UNDETERMINED'; basis = 'enterprise applicability unknown (DRU)'; }
+    else if (!reqVerified) { status = 'UNDETERMINED'; basis = 'requirement document not received or not checked (Decision 8)'; }
+    else if (eorg.some((e) => e.need_id === n.need_id)) { status = 'NOT_MET'; basis = 'verified operating shortfall on the same need (EORG)'; }
+    else if (res.some((r) => r.state === 'BCRG Confirmed')) { status = 'NOT_MET'; basis = 'verified carbon/energy resource gap (BCRG)'; }
+    else if (rows.length && rows.every((f) => f.status === 'APPLICABLE' && res.some((r) => r.fn === f.fn && r.state === 'Resource Adequate'))) { status = 'MET'; basis = 'all required functions applicable and verified adequate'; }
+    T.add({ id: `RQ-${n.need_id}`, layer: 'REQUIREMENT', statement: `硬性要求 ${n.text}：${status}`, inputs: [n.need_id].concat(rows.map((f) => `L2-${f.need_id}-${f.fn}`)), rule: 'H1 requirement compliance (PROPOSED)', source: basis, applicability: appUnknown ? 'UNKNOWN' : 'CONFIRMED', uncertainty: status === 'UNDETERMINED' ? basis : '', status: 'PROPOSED' });
+    return { need_id: n.need_id, text: n.text, status, basis, deadline: n.horizon || null };
+  });
+}
+function candidateCompliance(cand, reqs) {
+  if (!reqs.length) return { state: 'NO_HARD_REQUIREMENT', text: '沒有適用的硬性外部要求' };
+  const notMet = reqs.filter((r) => r.status === 'NOT_MET'), und = reqs.filter((r) => r.status === 'UNDETERMINED');
+  if (cand.kind === 'maintain') {
+    if (notMet.length) return { state: 'NON_COMPLIANT', text: `維持現況不符合適用的硬性要求：${notMet.map((r) => r.need_id).join('、')}`, reqs: notMet.map((r) => r.need_id) };
+    if (und.length) return { state: 'COMPLIANCE_UNDETERMINED', text: `維持現況是否符合硬性要求尚未確認：${und.map((r) => r.need_id).join('、')}`, reqs: und.map((r) => r.need_id) };
+    return { state: 'COMPLIANT', text: '已查證符合所有適用的硬性要求' };
+  }
+  // r3 Decision 1: for change candidates the requirement is answered by an enterprise-level response, independent of
+  // the BM choice → shown as a state, not a block on this candidate's O code.
+  if (notMet.length) return { state: 'REQUIRES_RESPONSE', text: `此候選須搭配企業層回應方案才可能符合：${notMet.map((r) => r.need_id).join('、')}`, reqs: notMet.map((r) => r.need_id) };
+  if (und.length) return { state: 'COMPLIANCE_UNDETERMINED', text: `是否符合硬性要求尚未確認：${und.map((r) => r.need_id).join('、')}（企業層處理）`, reqs: und.map((r) => r.need_id) };
+  return { state: 'COMPLIANT', text: '已查證符合所有適用的硬性要求' };
+}
+
+// ---------------------------------------------------------------- H4 endogenous-need adapter (outside the frozen BMI engine)
+// Uses the engine's own demand → element table (v1.2 appendix B; Q2=A ruled, entries L2-provisional) read-only.
+// It adds a comparison column; it never changes BMI candidates, ratings or ranking.
+const KIND_DEMAND = { cost: 'cost', efficiency: 'efficiency' };
+function endogenousComparison(assessment, needs, T) {
+  const res = assessment.main.result, rows = [];
+  for (const n of needs.filter((x) => x.source_types.some((t) => t === 'Strategy-Driven' || t === 'Operational-Driven') && !x.candidate_links.length)) {
+    const dem = BD.DEMANDS[KIND_DEMAND[n.kind]];
+    for (const c of res.candidates) {
+      let fit = 'NO_MAPPING', basis = 'need kind has no appendix-B demand type';
+      if (dem) {
+        const ch = new Set(c.changes || []), cfg = new Set(c.config || []);
+        fit = dem.direct.some((e) => ch.has(e)) ? 'CHANGE_ADDRESSES_DIRECT' : dem.partial.some((e) => ch.has(e)) ? 'CHANGE_ADDRESSES_PARTIAL'
+          : dem.direct.some((e) => cfg.has(e)) ? 'CURRENT_CONFIG_COVERS' : 'NOT_ADDRESSED';
+        basis = `appendix B ${KIND_DEMAND[n.kind]}: direct ${dem.direct.join('、')}; partial ${dem.partial.join('、')} (table designed for market signals; reuse for endogenous needs is unvalidated)`;
+      }
+      rows.push({ need_id: n.need_id, candidate: c.id, label: c.label, fit, basis, mapping_status: 'UNVALIDATED (D-11) — appendix B reused for an endogenous need' });
+    }
+    T.add({ id: `EN-${n.need_id}`, layer: 'IMPACT', statement: `內生需求候選比較：${rows.filter((r) => r.need_id === n.need_id).map((r) => `${r.candidate}=${r.fit}`).join('，')}`, inputs: [n.need_id, 'D-BMI-ENGINE'], rule: 'H4 adapter (PROPOSED); BMI ranking unchanged', source: dem ? 'engine data.js DEMANDS' : 'none', applicability: n.need_id, uncertainty: 'mapping reuse unvalidated', status: 'PROPOSED' });
+  }
+  return { rows, bmi_ranking: res.ranked || [], bmi_ranking_changed: false };
+}
+// Sensitivity only (never used in official output): what if endogenous needs were injected as engine signals?
+function endogenousWhatIf(input) {
+  const base = DY.cycle(clone(input.intake)).final.assessment.main.result;
+  const run = (forced) => {
+    const it = clone(input.intake); it.signals = it.signals || {}; const notes = [];
+    for (const n of ((input.m1 || {}).internal_needs || []).concat((input.m1 || {}).operations || [])) {
+      const k = KIND_DEMAND[n.kind]; if (!k) { notes.push(`${n.id}: kind ${n.kind} has no signal type`); continue; }
+      if (it.signals[k] && it.signals[k].on && !forced) { notes.push(`${n.id}: market signal of type ${k} already present; not overwritten`); continue; }
+      if (it.signals[k] && it.signals[k].on && forced) notes.push(`${n.id}: existing ${k} market signal overwritten (forced)`);
+      it.signals[k] = forced ? { on: true, text: n.text, source: 'doc', criteria: ['persist', 'multi'], key: true, ip: true, sca: true }
+        : { on: true, text: n.text, source: n.evidence.grade === 'VERIFIED' ? 'doc' : 'single', criteria: [], key: false, ip: false, sca: true };
+    }
+    const r = DY.cycle(it).final.assessment.main.result;
+    return { notes, formal: r.scenarios.formal.map((x) => x.id), decision: r.decision && r.decision.title, ranked: r.ranked || [] };
+  };
+  return { original: { formal: base.scenarios.formal.map((x) => x.id), decision: base.decision && base.decision.title, ranked: base.ranked || [] }, honest_injection: run(false), forced_structural_criteria: run(true),
+    note: 'TEST-ONLY sensitivity. Honest injection has no structural criteria, so D2=B keeps it out of formal scenarios. Forced variant treats each internal need as an A-grade market signal with two structural criteria and full relevance — this misstates internal needs as market evidence and is shown only as an upper bound of how far the BMI result could move.' };
+}
+
+// Candidate outcome under V2 conditions (vNext §9), V1 code kept alongside
+function candidateOutcomes(assessment, bridge, needs, fnRows, resRows, unknowns, reqs, eorg) {
+  const res = assessment.main.result, mode = bridge.result.mode;
+  return res.candidates.map((c) => {
+    const linked = needs.filter((n) => n.candidate_links.some((l) => l.candidate === c.id));
+    const rows = fnRows.filter((f) => linked.some((n) => n.need_id === f.need_id));
+    const v1c = (bridge.result.candidates || []).find((x) => x.id === c.id) || {};
+    const block = [], m1l2 = [];
+    for (const f of rows) {
+      if (/UNVALIDATED|CONCEPTUAL/.test(f.status)) block.push(`${f.need_id}/${f.fn} ${f.status}`);
+      if (f.status === 'APPLICABLE') { const r = resRows.find((x) => x.need_id === f.need_id && x.fn === f.fn); if (!r || r.state !== 'Resource Adequate') block.push(`${f.need_id}/${f.fn} ${r ? r.state : 'no resource state'}`); }
+    }
+    // R-V2-14: V1 candidate-specific states are kept as v1_state and re-validated, never promoted.
+    // Enterprise-wide REQUIREMENT_GAPs belong to Enterprise Outstanding Needs, not to this candidate.
+    // X8 (r3): V1 results are copied unchanged into v1_record. M1's own Layer-2 view is a separate field (m1_layer2);
+    // it does not redefine any V1 status.
+    const v1_record = { outcome: v1c.outcome || null, gaps: v1c.gaps || {}, pending: (v1c.candidate_level || {}).pending || {},
+      no_strategic_need_changed_rows: (v1c.rows || []).filter((r) => r.status === 'NO_STRATEGIC_NEED' && r.op && r.op !== '維持' && r.fn).map((r) => ({ row: r.row, cra: r.cra, fn: r.fn, op: r.op, status: r.status, reason: r.reason })) };
+    for (const [fn, g] of Object.entries(v1_record.gaps)) if (g.kind === 'STRATEGIC_OPPORTUNITY_GAP') m1l2.push({ fn, m1_status: 'LAYER2_NOT_VALIDATED', v1_status_kept: 'STRATEGIC_OPPORTUNITY_GAP' });
+    for (const r of v1_record.no_strategic_need_changed_rows) m1l2.push({ fn: r.fn, cra: r.cra, m1_status: 'LAYER2_VALIDATION_PENDING', v1_status_kept: 'NO_STRATEGIC_NEED' });
+    for (const [fn, p] of Object.entries(v1_record.pending)) if (/BMI 需求/.test(p.serves || '')) m1l2.push({ fn, m1_status: 'LAYER2_NOT_VALIDATED', v1_status_kept: 'PENDING' });
+    if (m1l2.length) block.push(`M1 Layer 2 (separate field): ${uniq(m1l2.map((x) => `${x.cra ? x.cra + '→' : ''}${x.fn} ${x.m1_status}`)).join(', ')}; V1 statuses unchanged`);
+    for (const u of unknowns.filter((u) => u.class !== 'Disclosure' && (u.target === c.id || linked.some((n) => n.need_id === u.target)))) block.push(`DRU ${u.id}`);
+    const comp = candidateCompliance(c, reqs);
+    // r3: only the maintain candidate is blocked by an undetermined hard requirement — for it, the requirement's
+    // reasonable values (MET / NOT_MET) change the conclusion between O1 and NON_COMPLIANT (decision-relevant).
+    if (c.kind === 'maintain' && comp.state === 'COMPLIANCE_UNDETERMINED') block.push(`H1 maintain: hard requirement ${comp.reqs.join(',')} undetermined (decision-relevant for maintain)`);
+    // H1: a maintain candidate in direct conflict with an applicable hard requirement gets no O code (shown as non-compliant)
+    const logic = comp.state === 'NON_COMPLIANT' ? null : block.length ? 'O0' : 'O1';
+    const display_state = comp.state === 'NON_COMPLIANT' ? 'NON_COMPLIANT' : logic;
+    const caveats = logic === 'O1' ? eorg.map((e) => `企業仍有已查證的營運資源缺口 ${e.need_id}「${e.text}」，此候選沒有處理`)
+      .concat(['REQUIRES_RESPONSE', 'COMPLIANCE_UNDETERMINED'].includes(comp.state) ? [`${comp.text}；見 Enterprise Outstanding Needs`] : []) : [];
+    const exploratory = mode === 'EXPLORATORY';
+    return { candidate: c.id, label: c.label, kind: c.kind, v1_outcome: v1c.outcome ? v1c.outcome.code : null, bridge_mode: mode,
+      v1_record, m1_layer2: m1l2,
+      compliance: comp, v2_logic_outcome: logic, v2_display_state: display_state,
+      // X4 (r3): in EXPLORATORY mode NON_COMPLIANT is labelled exploratory, not a determinate verdict
+      v2_displayed_outcome: comp.state === 'NON_COMPLIANT' ? (exploratory ? 'NON_COMPLIANT (EXPLORATORY)' : 'NON_COMPLIANT') : exploratory ? 'O0' : logic,
+      display_label: comp.state === 'NON_COMPLIANT' && exploratory ? `【探索性】依已核對的要求文件與已查證紀錄，${comp.text}；尚待企業確認` : '',
+      o1_scope: logic === 'O1' ? '在此候選與已評估範圍內，不需新增碳相關資源；不代表企業沒有其他資源需求；Enterprise Outstanding Needs 另列' : '',
+      o1_caveats: caveats, blocking: block };
+  });
+}
+
+// ---------------------------------------------------------------- M1-L4 advice (six questions)
+function advice(input, assessment, cyc, L, T) {
+  const at = input.as_of || '2026-11-16';
+  const res = assessment.main.result;
+  const q = {};
+  q.Q1_changes = L.needs.flatMap((n) => n.sources.map((s) => ({ text: s.text, type: s.type, date: s.date, grade: s.grade, trace: s.data })));
+  q.Q2_relevance = L.needs.map((n) => ({ need_id: n.need_id, why: `${n.source_types.join('+')}；範圍 ${[n.site, n.process_or_use].filter(Boolean).join(' / ') || '未知'}；證據 ${n.evidence_grade}`, trace: n.need_id }));
+  q.Q3_competitiveness = L.impacts.map((i) => ({ need_id: i.need_id, impact: `${i.competitive_advantage}；成本結構 ${i.cost_structure}；營運風險 ${i.operational_risk}`, certainty: i.certainty, trace: `I-${i.need_id}` }));
+  q.Q4_options = L.options.map((o) => ({ option: o.label, type: o.type, stage: o.stage, trace: o.id }))
+    .concat(L.outcomes.filter((c) => c.compliance.state !== 'NO_HARD_REQUIREMENT').map((c) => ({ option: `${c.label}：${c.compliance.text}`, type: 'compliance', stage: c.compliance.state, trace: c.compliance.reqs && c.compliance.reqs.length ? `RQ-${c.compliance.reqs[0]}` : 'D-BMI-ENGINE' })))
+    .concat(L.endo.rows.map((r) => ({ option: `${r.label} 對內生需求 ${r.need_id}：${r.fit}`, type: 'endogenous_fit', stage: 'unvalidated mapping', trace: `EN-${r.need_id}` })));
+  // Q5 priorities: process actions first; resource actions only if Comparable; BMI direction as stated by engine
+  const pr = [];
+  // one priority per need_id (no double counting across EORG and hard requirement)
+  // r3 Decision 7: major operational risk (EORG) first, then hard requirements by deadline (unknown deadline last)
+  const ent = [];
+  for (const n of L.needs) {
+    const isE = L.eorg.some((e) => e.need_id === n.need_id), hard = n.status === 'Need Identified' && n.sources.some((s) => s.hard === 'yes' && s.applies === 'yes');
+    if (!isE && !hard) continue;
+    const why = [isE ? '重大營運風險：已查證的營運資源缺口（企業層，不待碳功能驗證）' : '', hard ? '硬性外部要求' : ''].filter(Boolean).join('＋');
+    const nc = L.outcomes.some((c) => c.compliance.state === 'NON_COMPLIANT' && (c.compliance.reqs || []).includes(n.need_id));
+    const rq = L.reqs.find((r) => r.need_id === n.need_id);
+    ent.push({ isE, deadline: n.horizon || null, item: { action: `處理 ${n.need_id}「${n.text}」：${why}；期限 ${n.horizon || '未知'}${rq && rq.status === 'UNDETERMINED' ? `；符合狀態未確認（${rq.basis}）` : ''}${nc ? '；維持現況不符合此要求（H1）' : ''}；先查證相關既有資源`, kind: 'process', deadline: n.horizon || null, trace: hard ? `RQ-${n.need_id}` : n.need_id } });
+  }
+  ent.sort((a, b) => (b.isE - a.isE) || ((a.deadline || '9999') < (b.deadline || '9999') ? -1 : (a.deadline || '9999') > (b.deadline || '9999') ? 1 : 0));
+  for (const e of ent) pr.push(e.item);
+  for (const u of L.unknowns.filter((u) => u.class === 'Critical-Query')) pr.push({ action: `補問：${u.about}`, kind: 'process', trace: `U-${u.id}` });
+  const pend = L.functions.filter((f) => /UNVALIDATED|CONCEPTUAL/.test(f.status));
+  for (const nid of uniq(pend.map((f) => f.need_id))) { const fs = pend.filter((f) => f.need_id === nid); pr.push({ action: `驗證 ${nid} 與 ${fs.map((f) => f.fn).join('、')} 的實質關聯（D-14；H2 四層）`, kind: 'process', trace: `L2-${nid}-${fs[0].fn}` }); }
+  if (res.decision) pr.push({ action: `BMI 方向（${res.decision.type}）：${res.decision.title}`, kind: 'bmi_direction', trace: 'D-BMI-ENGINE' });
+  // X9 (r3): explain when the BMI top candidate does not address an endogenous need that another candidate addresses
+  const top = res.decision && res.decision.candidate;
+  for (const nid of uniq(L.endo.rows.map((r) => r.need_id))) {
+    const rows = L.endo.rows.filter((r) => r.need_id === nid), t = rows.find((r) => r.candidate === top);
+    const others = rows.filter((r) => r.candidate !== top && /^CHANGE_ADDRESSES/.test(r.fit));
+    if (t && t.fit === 'NOT_ADDRESSED' && others.length) pr.push({ action: `說明：BMI 首選「${t.label}」沒有處理內生需求 ${nid}；處理它的候選：${others.map((o) => o.label).join('、')}（對照未驗證，BMI 排序不變）`, kind: 'explanation', trace: `EN-${nid}` });
+  }
+  for (const o of L.options.filter((o) => o.type === 'operational_improvement' && o.stage === 'Comparable')) pr.push({ action: `納入比較（非強制）：${o.label}`, kind: 'option', trace: o.id });
+  for (const o of L.options.filter((o) => o.type === 'resource' && o.stage === 'Comparable')) pr.push({ action: `可考慮（非強制）：${o.label}`, kind: 'resource', trace: o.id });
+  q.Q5_priorities = pr;
+  const trig = DY.triggers(cyc, at).map((t) => ({ text: t.text, when: t.when || null, rule: t.rule }));
+  for (const n of L.needs) for (const s of n.sources.filter((s) => s.date)) trig.push({ text: `來源更新或到期：${s.text}`, when: null, rule: 'M1-L4 source-date trigger' });
+  for (const u of L.unknowns.filter((u) => u.class !== 'Disclosure')) trig.push({ text: `取得資料後重評：${u.about}`, when: null, rule: 'DRU' });
+  q.Q6_reassessment = trig;
+  for (const [k, v] of Object.entries(q)) T.add({ id: `A-${k}`, layer: 'ADVICE', statement: `${k}: ${v.length} items`, inputs: uniq(v.map((x) => x.trace).filter(Boolean)), rule: 'M1-L4 six questions', source: '', applicability: '', uncertainty: '', status: 'PROPOSED' });
+  return q;
+}
+
+// ---------------------------------------------------------------- pipeline
+function setPath(obj, path, val) { const ks = path.split('.'); let o = obj; for (const k of ks.slice(0, -1)) { o[k] = o[k] || {}; o = o[k]; } o[ks[ks.length - 1]] = val; }
+function applyPatch(input, patch) { const x = clone(input); x.m1 = Object.assign({}, x.m1, { unknowns: [] });
+  for (const [p, v] of Object.entries(patch || {})) { if (p.endsWith('+')) { const k = p.slice(0, -1); const cur = k.split('.').reduce((o, q) => (o || {})[q], x); setPath(x, k, (cur || []).concat(v)); } else setPath(x, p, v); }
+  return x; }
+function fingerprint(o) { return JSON.stringify({ n: o.layer1.needs.map((n) => [n.need_id, n.status]), f: o.layer2.functions.map((f) => [f.need_id, f.fn, f.status]), r: o.layer2.resources.map((r) => [r.fn, r.state]), q: o.hard_requirements.map((r) => [r.need_id, r.status]), c: o.candidate_outcomes.map((c) => [c.candidate, c.v2_logic_outcome, c.compliance.state]), p: o.options.map((x) => [x.type, x.stage]) }); }
+function runM1(input, runOpts) {
+  const T = tracer();
+  const cyc = DY.cycle(clone(input.intake));
+  const a = cyc.final.assessment, b = cyc.final.bridge;
+  const { needs, eorg } = identifyNeeds(input, a, T);
+  const recompute = (runOpts && runOpts.noRecompute) ? null : (patch) => fingerprint(runM1(applyPatch(input, patch), { noRecompute: true }));
+  const unknowns = classifyUnknowns(input, needs, T, recompute);
+  const functions = functionStatus(input, needs, unknowns.filter((u) => u.class !== 'Disclosure'), T);
+  const resources = resourceState(input, functions, T);
+  const imp = impacts(input, a, needs, T);
+  const opts = options(input, a, b, needs, functions, resources, unknowns, T);
+  const reqs = requirementCompliance(needs, functions, resources, eorg, unknowns, T);
+  const outcomes = candidateOutcomes(a, b, needs, functions, resources, unknowns, reqs, eorg);
+  const endo = endogenousComparison(a, needs, T);
+  const L = { needs, eorg, functions, resources, unknowns, impacts: imp, options: opts, outcomes, reqs, endo };
+  const adv = advice(input, a, cyc, L, T);
+  const enterpriseOutstanding = needs.filter((n) => n.enterprise_level).map((n) => ({ need_id: n.need_id, text: n.text, sources: n.source_types, functions: functions.filter((f) => f.need_id === n.need_id).map((f) => `${f.fn}:${f.status}`), eorg: eorg.some((e) => e.need_id === n.need_id), hard_requirement: (reqs.find((r) => r.need_id === n.need_id) || {}).status || null }));
+  return {
+    schema: 'eko-m1-advice/0.1-test-only', test_only: true,
+    bmi: { primary: a.primary, decision: a.main.result.decision && { type: a.main.result.decision.type, title: a.main.result.decision.title, candidate: a.main.result.decision.candidate || null }, candidates: a.main.result.candidates.map((c) => ({ id: c.id, label: c.label, ip: c.eval.ip.rating, feas: c.eval.feas.rating })) },
+    bridge_v1: { version: b.version, mode: b.result.mode, enterprise_requirements: b.result.enterprise_level.requirements.map((r) => ({ challenge: r.challenge, functions: r.functions, status: r.status })) },
+    layer1: { needs, eorg }, layer2: { functions, resources }, unknowns, impacts: imp, options: opts,
+    hard_requirements: reqs, endogenous_comparison: endo,
+    candidate_outcomes: outcomes, enterprise_outstanding_needs: enterpriseOutstanding, recommended_actions: adv.Q5_priorities,
+    advice: adv, trace: T.nodes,
+  };
+}
+
+// trace integrity: every advice item must reach at least one DATA node through the chain
+function traceIntegrity(out) {
+  const byId = new Map(out.trace.map((n) => [n.id, n]));
+  const reachesData = (id, seen = new Set()) => {
+    if (seen.has(id)) return false; seen.add(id);
+    const n = byId.get(id); if (!n) return false;
+    if (n.layer === 'DATA') return true;
+    return n.inputs.some((i) => reachesData(i, seen));
+  };
+  const items = [].concat(...Object.values(out.advice)).filter((x) => x.trace);
+  const broken = items.filter((x) => !reachesData(x.trace));
+  const missingFields = out.trace.filter((n) => n.layer !== 'DATA' && (n.rule == null || n.status == null));
+  return { items: items.length, broken: broken.map((x) => x.trace), missingFields: missingFields.length };
+}
+
+module.exports = { runM1, traceIntegrity, sameNeed, endogenousWhatIf, candidateOutcomes }; // candidateOutcomes exported for the synthetic unit test (r3.1)
+/* ===== 原樣結束 ===== */
+  root.M1_HOWARD = module.exports;
+})(window);
+</script>
+<script>
+// ---- m1-adapter.js ----
+// 11/20：網站改用 Howard 的 M1 原型（m1.js r3.1，上方原樣收錄，SHA-256 6241342f…）。這裡只負責：
+// ① 把網站問卷（intake.m1：公司需求、營運問題、外部要求範圍）轉成 Howard 的 M1Input；② 提供問卷頁用的選項清單。
+// 規則與計算全部在 Howard 的 runM1，這裡不做任何判斷。網站沒有 EKO 文件核對紀錄，所以不送 document_checks、verification。
+(function (root) {
+  const H = root.M1_HOWARD;
   const SC_LABEL = { SC1: '能源或碳相關成本上升', SC2: '客戶或供應鏈的永續要求', SC3: '法規或市場進入的要求', SC4: '低碳產品或服務的市場機會', SC5: '供電穩定或電價波動的風險', SC6: '銀行、投資人或融資條件的永續要求', SC7: '對外宣稱或揭露的義務' };
   const KIND = [['cost', '降低成本'], ['efficiency', '提高生產或能源效率'], ['competitiveness', '提升競爭力'], ['bm_innovation', '商業模式創新']];
-  const KIND_DEMAND = { cost: 'cost', efficiency: 'efficiency' }; // 其餘兩類由企業選擇最接近的變化類型（附錄 B）
-  const RCLASS = [['GEN', '發電或電力來源不足', 'F1'], ['EFF', '設備或製程能源效率不佳', 'F4'], ['STOR', '缺少儲能或備援電力', 'F5'], ['DIST', '廠內配電設備不足', 'F2'], ['GRID', '併網或轉供受限', 'F3']];
+  const RCLASS = [['GEN', '發電或電力來源不足', 'F1', 'reliability'], ['EFF', '設備或製程能源效率不佳', 'F4', 'efficiency'], ['STOR', '缺少儲能或備援電力', 'F5', 'reliability'], ['DIST', '廠內配電設備不足', 'F2', 'reliability'], ['GRID', '併網或轉供受限', 'F3', 'reliability']];
   const FN = { F1: '自有或簽約的發電來源', F2: '廠區內配電或微電網', F3: '併網或轉供安排', F4: '節能設備或能源效率改善', F5: '儲能、備援電力或需量反應', F6: '再生能源憑證或綠電環境屬性', F7a: '減排措施（製程、燃料或產品設計）', F7b: '碳移除專案', F7c: '碳信用（碳權）', F8: '排放與能源數據的盤查、計算或查證' };
-  const NO_BUY = ['F7c']; // M1-L3：不產生「需要碳權」或「應購買」的選項
-  const fnName = (f) => FN[f] || f;
-  const known = (v) => v != null && String(v).trim() !== '' && v !== 'unknown';
-  const arr = (x) => (Array.isArray(x) ? x : x ? Object.keys(x).sort((a, b) => Number(a) - Number(b)).map((k) => x[k]) : []); // 問卷以 {0:…,1:…} 存
-  const norm = (v) => String(v == null ? '' : v).replace(/[\s　]+/g, ' ').trim().toLowerCase();
-
-  // Decision 8：來源類型 → 證據等級（網站沒有 EKO 文件核對紀錄，因此不會出現 VERIFIED）
-  function gradeOf(source) {
-    if (source === 'doc') return 'SELF_REPORT_TRACEABLE'; // 企業表示可提供文件：未核對前不是 VERIFIED
-    if (source === 'firsthand' || source === 'multi') return 'SELF_REPORT_TRACEABLE';
-    if (source === 'single') return 'SURVEY_INFERENCE';
-    return 'NONE';
+  // Decision 8 的來源等級（與 Howard m1.js 的 SOURCE_GRADE 相同）；企業自填一律不會是 VERIFIED
+  const GRADE = { doc: 'SELF_REPORT_TRACEABLE', firsthand: 'SELF_REPORT_TRACEABLE', multi: 'SELF_REPORT_TRACEABLE', single: 'SURVEY_INFERENCE' };
+  const SRC_TEXT = { doc: '企業表示可提供文件（EKO 尚未核對）', firsthand: '客戶或供應商直接告知', multi: '兩個以上獨立來源', single: '單一報導、傳聞或公司內部預期' };
+  const arr = (x) => (Array.isArray(x) ? x : x ? Object.keys(x).sort((a, b) => Number(a) - Number(b)).map((k) => x[k]) : []);
+  const val = (v) => (v == null || String(v).trim() === '' ? null : String(v).trim());
+  const ev = (n) => ({ grade: GRADE[n.source] || 'NONE', source: SRC_TEXT[n.source] || '未提供來源', date: val(n.date) });
+  function toInput(intake) {
+    const m = intake.m1 || {}, ch = (intake.sustain && intake.sustain.challenges) || {};
+    const internal_needs = [], operations = [], function_evidence = [], unknowns = [];
+    const feFor = (id, fns, fdoc) => [...new Set(fns)].filter((f) => FN[f] && f !== 'F7c').forEach((f) => function_evidence.push({ need_ref: id, function: f, status: 'UNVALIDATED',
+      applicability_confirmed: fdoc === 'yes', source: fdoc === 'yes' ? '企業表示可提供文件證明適用（EKO 尚未核對）' : '企業自述' }));
+    arr(m.needs).forEach((n, i) => { if (!n || !n.on) return; const id = 'IN' + (i + 1);
+      internal_needs.push({ id, kind: n.kind || null, text: val(n.text) || (KIND.find((k) => k[0] === n.kind) || [0, '公司自己的需求'])[1], site: val(n.site), process_or_use: val(n.process),
+        purpose: (KIND.find((k) => k[0] === n.kind) || [0, null])[1], horizon: val(n.horizon), scale: val(n.scale), evidence: ev(n) });
+      feFor(id, n.fns || [], n.fdoc); });
+    arr(m.ops).forEach((n, i) => { if (!n || !n.on) return; const id = 'OP' + (i + 1), rc = RCLASS.find((r) => r[0] === n.rclass);
+      operations.push({ id, kind: rc ? rc[3] : null, text: val(n.text) || (rc ? rc[1] : '營運問題'), site: val(n.site), process_or_use: val(n.process), purpose: rc ? rc[1] : null,
+        horizon: val(n.horizon), scale: val(n.scale), resource_class: n.rclass || null, verified_shortfall: n.shortfall === 'yes' ? true : n.shortfall === 'no' ? false : null, evidence: ev(n) });
+      feFor(id, (rc ? [rc[2]] : []).concat(n.fns || []), n.fdoc);
+      if (!n.shortfall || n.shortfall === 'unknown') unknowns.push({ id: 'U-' + id + '-shortfall', about: `營運問題第 ${i + 1} 項是否已確認確實有缺口`, affects: 'need', target: id,
+        plausible_values: [{ value: '有缺口', effect: '', patch: { [`m1.operations.${operations.length - 1}.verified_shortfall`]: true } }, { value: '沒有缺口', effect: '', patch: { [`m1.operations.${operations.length - 1}.verified_shortfall`]: false } }], resolvable_from: [] }); });
+    const challenge_scope = {};
+    Object.keys(ch).filter((sc) => ch[sc] && ch[sc].on).forEach((sc) => {
+      const s = (m.scope || {})[sc] || {};
+      challenge_scope[sc] = { site: val(s.site), process_or_use: val(s.process), purpose: SC_LABEL[sc] || sc, horizon: val(s.horizon) || val(ch[sc].date), scale: val(s.scale) };
+      // 網站答「不確定」的項目，交給 Howard 的 DRU 以兩種可能答案重算分類（Decision 5）
+      if (!ch[sc].applies || ch[sc].applies === 'unknown') unknowns.push({ id: 'U-' + sc + '-applies', about: `「${SC_LABEL[sc] || sc}」是否適用貴公司`, affects: 'need', target: sc,
+        plausible_values: [{ value: '適用', effect: '', patch: { [`intake.sustain.challenges.${sc}.applies`]: 'yes' } }, { value: '不適用', effect: '', patch: { [`intake.sustain.challenges.${sc}.applies`]: 'no' } }], resolvable_from: [] });
+      if (ch[sc].applies !== 'no' && (!ch[sc].hard || ch[sc].hard === 'unknown')) unknowns.push({ id: 'U-' + sc + '-hard', about: `「${SC_LABEL[sc] || sc}」做不到時，是否會失去客戶資格、受罰或無法進入市場`, affects: 'need', target: sc,
+        plausible_values: [{ value: '會', effect: '', patch: { [`intake.sustain.challenges.${sc}.hard`]: 'yes' } }, { value: '不會', effect: '', patch: { [`intake.sustain.challenges.${sc}.hard`]: 'no' } }], resolvable_from: [] });
+    });
+    return { intake: JSON.parse(JSON.stringify(intake)), as_of: new Date().toISOString().slice(0, 10), m1: { internal_needs, operations, challenge_scope, function_evidence, unknowns } };
   }
-  const SOURCE_TEXT = { doc: '可以提供文件（EKO 尚未核對）', firsthand: '客戶或供應商直接告知', multi: '兩個以上獨立來源', single: '單一報導、傳聞或公司內部預期' };
-
-  // ---------- M1-L1 需求 ----------
-  function needs(inp) {
-    const out = [];
-    const ch = (inp.intake.sustain && inp.intake.sustain.challenges) || {};
-    const m1 = inp.intake.m1 || {};
-    const scope = m1.scope || {};
-    Object.keys(ch).filter((k) => ch[k] && ch[k].on && ch[k].applies !== 'no').forEach((sc) => {
-      const c = ch[sc], s = scope[sc] || {};
-      out.push({ id: 'N-' + sc, origin: 'External', layer: 'enterprise', type: sc, label: SC_LABEL[sc] || sc, text: c.text || '',
-        sources: [{ kind: '外部要求', grade: gradeOf(c.source), source: c.source, applies: c.applies || 'unknown', date: c.date || '' }],
-        site: s.site || '', process: s.process || '', purpose: sc, horizon: s.horizon || c.date || '', scale: s.scale || '',
-        hard: c.hard === 'yes', hardAnswer: c.hard || 'unknown', applies: c.applies || 'unknown', date: c.date || '', reqs: c.reqs || [], data: [`永續與能源頁：${SC_LABEL[sc] || sc}`] });
-    });
-    const sc = inp.bmi && inp.bmi.scenarios ? inp.bmi.scenarios.formal : [];
-    sc.forEach((s, i) => out.push({ id: 'N-M' + (i + 1), origin: 'External', layer: 'enterprise', type: 'market', label: `市場變化：${s.demandName}`, text: '',
-      sources: [{ kind: 'BMI 正式市場情境', grade: s.grade === 'C' ? 'SURVEY_INFERENCE' : 'SELF_REPORT_TRACEABLE', applies: 'yes', date: '' }],
-      site: '', process: '', purpose: 'market:' + s.demand, horizon: '', scale: '', hard: false, hardAnswer: 'no', applies: 'yes', date: '', reqs: [], demand: s.demand, data: [`創新目標頁：市場變化「${s.demandName}」（可信度 ${s.grade}）`] }));
-    arr(m1.needs).forEach((n, i) => { if (!n || !n.on) return;
-      const kindName = (KIND.find((k) => k[0] === n.kind) || [n.kind, n.kind || '未選類型'])[1];
-      out.push({ id: 'N-I' + (i + 1), origin: 'Strategy', layer: 'enterprise', type: n.kind || '', label: `公司自己的需求：${kindName}`, text: n.text || '',
-        sources: [{ kind: '公司內部需求', grade: gradeOf(n.source), source: n.source, applies: 'yes', date: n.date || '' }],
-        site: n.site || '', process: n.process || '', purpose: n.kind || '', horizon: n.horizon || '', scale: n.scale || '', hard: false, hardAnswer: 'no', applies: 'yes', date: n.date || '', reqs: [],
-        demand: KIND_DEMAND[n.kind] || n.demand || '', fns: (n.fns || []).filter((f) => FN[f]), fdoc: n.fdoc || 'unknown', data: [`公司需求頁：第 ${i + 1} 項需求`] }); });
-    arr(m1.ops).forEach((n, i) => { if (!n || !n.on) return;
-      const rc = RCLASS.find((r) => r[0] === n.rclass);
-      out.push({ id: 'N-O' + (i + 1), origin: 'Operational', layer: 'enterprise', type: n.rclass || '', label: `營運問題：${rc ? rc[1] : '未選類型'}`, text: n.text || '',
-        sources: [{ kind: '營運問題', grade: gradeOf(n.source), source: n.source, applies: 'yes', date: n.date || '' }],
-        site: n.site || '', process: n.process || '', purpose: 'ops:' + (n.rclass || ''), horizon: n.horizon || '', scale: n.scale || '', hard: false, hardAnswer: 'no', applies: 'yes', date: n.date || '', reqs: [],
-        shortfall: n.shortfall || 'unknown', fns: [...new Set((rc ? [rc[2]] : []).concat(n.fns || []))].filter((f) => FN[f]), fdoc: n.fdoc || 'unknown', data: [`公司需求頁：第 ${i + 1} 項營運問題`] }); });
-    // L1-1 需求成立：排除 applies＝unknown 的來源後，最佳等級至少為 SELF_REPORT_TRACEABLE
-    out.forEach((n) => {
-      const usable = n.sources.filter((s) => s.applies !== 'unknown');
-      const best = usable.reduce((m, s) => (GR[s.grade] > GR[m] ? s.grade : m), 'NONE');
-      n.grade = n.sources.reduce((m, s) => (GR[s.grade] > GR[m] ? s.grade : m), 'NONE');
-      n.established = GR[best] >= GR.SELF_REPORT_TRACEABLE;
-      n.statusNote = n.established ? '' : !usable.length ? '是否適用貴公司還不確定，需求暫不成立' : best === 'SURVEY_INFERENCE' ? '來源是單一報導、傳聞或內部預期（C 級），需求暫不成立' : '沒有提供資訊來源，需求暫不成立';
-    });
-    // L1-2 去重：場址、製程或用途、目的、時間、規模五項都已知且相同才合併；任一未知 → 不合併，同製程標「可能重複」
-    const keys = (n) => [n.site, n.process, n.purpose, n.horizon, n.scale];
-    const merged = [];
-    out.forEach((n) => {
-      const allKnown = keys(n).every(known);
-      const twin = allKnown && merged.find((m) => keys(m).every(known) && keys(m).every((v, i) => norm(v) === norm(keys(n)[i])));
-      if (twin) { twin.sources = twin.sources.concat(n.sources); twin.data = twin.data.concat(n.data); twin.mergedFrom = (twin.mergedFrom || []).concat(n.id); return; }
-      if (known(n.process)) { const same = merged.find((m) => known(m.process) && norm(m.process) === norm(n.process)); if (same) { n.possibleDup = same.id; } }
-      merged.push(n);
-    });
-    // L1-3 EORG：營運缺口已查證（需通過 EKO 文件核對）。網站沒有核對紀錄 → 不會成立
-    merged.forEach((n) => { n.eorg = n.origin === 'Operational' && n.shortfall === 'yes' && n.grade === 'VERIFIED'; });
-    // 候選層的策略需求：BMI 主要方向的元素變化（只作說明，不進企業層事項）
-    const lead = inp.bmi && inp.bmi.decision && inp.bmi.decision.candidate ? inp.bmi.candidates.find((c) => c.id === inp.bmi.decision.candidate) : null;
-    if (lead && lead.changes && lead.changes.length) merged.push({ id: 'N-C', origin: 'Strategy', layer: 'candidate', type: 'bmi', label: `BMI 主要方向「${lead.label}」需要調整的元素`, text: lead.changes.map((c) => D.ELEMENTS[c] ? D.ELEMENTS[c].name : c).join('、'),
-      sources: [{ kind: 'BMI 推論', grade: 'SURVEY_INFERENCE', applies: 'yes', date: '' }], grade: 'SURVEY_INFERENCE', established: false, statusNote: '候選層需求：只作說明，不列入企業層事項', site: '', process: '', purpose: 'bmi', horizon: '', scale: '', hard: false, reqs: [], data: ['37 題＋延伸評估 → BMI 推論'] });
-    return merged;
-  }
-
-  // ---------- Layer 2（H2 四層）＋ H1 ----------
-  function layer2(inp, ns) {
-    const raw = (inp.bridgeRaw && (inp.bridgeRaw.result || inp.bridgeRaw)) || {}; // runBridge 回傳 { result: {requirement_gaps…} }
-    const gaps = raw.requirement_gaps || [];
-    const rows = [];
-    ns.filter((n) => n.layer === 'enterprise').forEach((n) => {
-      let fns = [], named = false;
-      if (n.origin === 'External' && n.type !== 'market') { fns = [...new Set(gaps.filter((g) => g.type === n.type).flatMap((g) => g.functions || []))]; named = fns.length > 0; }
-      else fns = n.fns || [];
-      fns.filter((f) => !NO_BUY.includes(f)).forEach((f) => {
-        const L = {};
-        L.explicit = named ? 'NAMED' : 'NOT_NAMED';
-        // 企業適用性：需求成立、場址與製程已知、沒有適用範圍的未知；由要求指定的功能須要求已核對（VERIFIED）且 applies＝yes；內生需求的功能須企業表示適用
-        const scopeKnown = known(n.site) && known(n.process);
-        if (!n.established || !scopeKnown) L.enterprise = 'UNKNOWN';
-        else if (named) L.enterprise = n.grade === 'VERIFIED' && n.applies === 'yes' ? 'CONFIRMED' : 'UNKNOWN';
-        else L.enterprise = n.fdoc === 'yes' ? 'CONFIRMED' : 'UNKNOWN';
-        L.function = 'PENDING'; // r3.1：VALIDATED 須附 verification{source, status=CHECKED, date, scope}；網站沒有 → 待驗證
-        L.mapping = 'UNVALIDATED'; // D-11 尚未完成
-        const status = L.function === 'VALIDATED' && L.enterprise === 'CONFIRMED' ? 'APPLICABLE' : 'MAPPING_UNVALIDATED';
-        const why = [!n.established && '需求尚未成立', !scopeKnown && '場址或製程未知', named && L.enterprise !== 'CONFIRMED' && n.established && scopeKnown && '外部要求的文件尚未經 EKO 核對', !named && n.fdoc !== 'yes' && n.established && scopeKnown && '企業尚未表示可提供適用文件', '功能驗證待完成', '功能對照尚未驗證（D-11）'].filter(Boolean);
-        rows.push({ need: n.id, needLabel: n.label, fn: f, fnName: fnName(f), layers: L, status, reason: why.join('；') });
-      });
-    });
-    // H1 企業層硬性要求
-    const hard = ns.filter((n) => n.layer === 'enterprise' && n.origin === 'External' && n.established && n.hard && n.applies === 'yes').map((n) => {
-      const verified = n.grade === 'VERIFIED';
-      const fnRows = rows.filter((r) => r.need === n.id);
-      let status = 'UNDETERMINED';
-      if (verified && ns.some((m) => m.eorg && m.id === n.id)) status = 'NOT_MET';
-      else if (verified && fnRows.length && fnRows.every((r) => r.status === 'APPLICABLE')) status = 'MET';
-      const basis = verified ? '要求文件已核對' : '要求的文件尚未經 EKO 核對（Decision 8）';
-      return { need: n.id, label: n.label, text: n.text, status, basis, deadline: n.horizon || n.date || '', reqs: n.reqs };
-    });
-    return { functions: rows, hard };
-  }
-
-  // ---------- M1-L2 影響（含 H4）＋ M1-L3 選項與候選結論 ----------
-  function relation(c, demand, base) {
-    const d = D.DEMANDS[demand];
-    if (!d) return 'NO_MAPPING';
-    const ch = c.changes || [];
-    if (d.direct.some((x) => ch.includes(x))) return 'CHANGE_ADDRESSES_DIRECT';
-    if (d.partial.some((x) => ch.includes(x))) return 'CHANGE_ADDRESSES_PARTIAL';
-    if (d.direct.some((x) => base.includes(x))) return 'CURRENT_CONFIG_COVERS';
-    return 'NOT_ADDRESSED';
-  }
-  const REL_TEXT = { CHANGE_ADDRESSES_DIRECT: '這個方向直接處理', CHANGE_ADDRESSES_PARTIAL: '這個方向部分處理', CURRENT_CONFIG_COVERS: '目前的商模已涵蓋', NOT_ADDRESSED: '這個方向沒有處理', NO_MAPPING: '對照表沒有這類需求' };
-
-  function core(inp) {
-    const ns = needs(inp);
-    const L2 = layer2(inp, ns);
-    const bmi = inp.bmi || { candidates: [], ranked: [], decision: null };
-    const maint = bmi.candidates.find((c) => c.kind === 'maintain');
-    const base = maint ? maint.config || [] : [];
-    // H4 內生需求比較（BMI 排序不變；每列標 mapping_status: UNVALIDATED (D-11)）
-    const endo = ns.filter((n) => n.layer === 'enterprise' && n.origin === 'Strategy').map((n) => ({ need: n.id, label: n.label, text: n.text, demand: n.demand,
-      demandName: D.DEMANDS[n.demand] ? D.DEMANDS[n.demand].name : '未選', rows: bmi.candidates.map((c) => ({ cand: c.id, label: c.label, rel: relation(c, n.demand, base) })), mapping_status: 'UNVALIDATED (D-11)' }));
-    // 候選結論
-    const bview = (inp.bridgeView && inp.bridgeView.candidates) || [];
-    const outcomes = bmi.candidates.map((c) => {
-      const bv = bview.find((x) => x.id === c.id) || { own: [], pending: [] };
-      const m1_layer2 = bv.own.map((o) => ({ item: o.name, m1_status: 'LAYER2_NOT_VALIDATED', v1_status_kept: 'STRATEGIC_OPPORTUNITY_GAP' }))
-        .concat(bv.pending.map((o) => ({ item: o.name, m1_status: 'LAYER2_NOT_VALIDATED', v1_status_kept: '候選 pending' })));
-      let compliance = 'NO_HARD_REQUIREMENT';
-      if (L2.hard.length) {
-        if (c.kind === 'maintain') compliance = L2.hard.some((h) => h.status === 'NOT_MET') ? 'NON_COMPLIANT' : L2.hard.every((h) => h.status === 'MET') ? 'COMPLIANT' : 'COMPLIANCE_UNDETERMINED';
-        else compliance = L2.hard.some((h) => h.status === 'NOT_MET') ? 'REQUIRES_RESPONSE' : L2.hard.every((h) => h.status === 'MET') ? 'COMPLIANT' : 'COMPLIANCE_UNDETERMINED';
-      }
-      const blocking = m1_layer2.map((x) => `碳相關資源「${x.item}」的功能與對應尚未驗證`);
-      if (c.kind === 'maintain' && compliance === 'COMPLIANCE_UNDETERMINED') blocking.push('硬性要求的符合狀態還不能確定（對維持而言是會改變結論的未知）');
-      const logic = compliance === 'NON_COMPLIANT' ? null : blocking.length ? 'O0' : 'O1';
-      const caveats = [];
-      if (logic === 'O1') {
-        caveats.push('範圍：只依企業提供的資料與 EKO 規則；未經真實企業驗證');
-        if (ns.some((n) => n.eorg)) caveats.push('企業有已查證的營運缺口尚未處理');
-        if (compliance === 'REQUIRES_RESPONSE' || compliance === 'COMPLIANCE_UNDETERMINED') caveats.push('另有硬性要求待回應，見「現在先做什麼」');
-      }
-      const displayed = compliance === 'NON_COMPLIANT' ? 'NON_COMPLIANT (EXPLORATORY)' : 'O0'; // 網站使用者一律視為真實企業：EXPLORATORY 模式
-      return { cand: c.id, label: c.label, kind: c.kind, rank: bmi.ranked.indexOf(c.id) + 1 || null, conditional: (bmi.conditional || []).includes(c.id), compliance, m1_layer2, blocking, logic, displayed, caveats };
-    });
-    // M1-L3 選項
-    const options = [];
-    bmi.candidates.forEach((c) => options.push({ type: c.kind === 'maintain' ? 'maintain' : 'bm_adjustment', label: c.label, cand: c.id,
-      stage: c.kind === 'maintain' ? 'Comparable' : (c.eval && c.eval.feas.rating === '可行' && c.eval.ip && ['高', '中', '低'].includes(c.eval.ip.rating) ? 'Comparable' : 'Exploratory') }));
-    ns.filter((n) => n.layer === 'enterprise' && n.origin !== 'External').forEach((n) => options.push({ type: 'operational_improvement', label: n.label + (n.text ? `：${n.text}` : ''), need: n.id, stage: n.grade === 'VERIFIED' ? 'Comparable' : 'Exploratory' }));
-    L2.functions.forEach((r) => options.push({ type: 'resource', label: `${r.fnName}（${r.needLabel}）`, need: r.need, fn: r.fn, stage: 'Exploratory', next: '先查證' }));
-    return { needs: ns, functions: L2.functions, hard: L2.hard, endogenous: { rows: endo, bmi_ranking: bmi.ranked, bmi_ranking_changed: false }, outcomes, options };
-  }
-
-  // ---------- 未知事項（DRU）：以合理可能值代入重算，比對決策指紋 ----------
-  function fingerprint(r) {
-    return JSON.stringify([r.needs.map((n) => [n.id, n.established]), r.functions.map((f) => [f.need, f.fn, f.status]), r.hard.map((h) => [h.need, h.status]),
-      r.outcomes.map((o) => [o.cand, o.logic, o.compliance]), r.options.map((o) => [o.type, o.label, o.stage])]);
-  }
-  function unknownsOf(inp) {
-    const xs = [];
-    const ch = (inp.intake.sustain && inp.intake.sustain.challenges) || {};
-    Object.keys(ch).filter((k) => ch[k] && ch[k].on).forEach((sc) => {
-      const c = ch[sc];
-      if (!c.applies || c.applies === 'unknown') xs.push({ id: 'U-' + sc + '-applies', about: `「${SC_LABEL[sc]}」是否適用貴公司`, values: ['yes', 'no'], patch: (i, v) => { i.intake.sustain.challenges[sc].applies = v; } });
-      if (c.applies !== 'no' && (!c.hard || c.hard === 'unknown')) xs.push({ id: 'U-' + sc + '-hard', about: `「${SC_LABEL[sc]}」做不到時，是否會失去客戶資格、受罰或無法進入市場`, values: ['yes', 'no'], patch: (i, v) => { i.intake.sustain.challenges[sc].hard = v; } });
-    });
-    const ops = (inp.intake.m1 && inp.intake.m1.ops) || {};
-    Object.keys(ops).sort((a, b) => Number(a) - Number(b)).forEach((k) => { const n = ops[k]; if (n && n.on && (!n.shortfall || n.shortfall === 'unknown')) xs.push({ id: 'U-O' + (Number(k) + 1) + '-shortfall', about: `營運問題第 ${Number(k) + 1} 項是否已確認有缺口`, values: ['yes', 'no'], patch: (i, v) => { i.intake.m1.ops[k].shortfall = v; } }); });
-    return xs;
-  }
-  function dru(inp) {
-    return unknownsOf(inp).map((u) => {
-      const prints = u.values.map((v) => { const c = JSON.parse(JSON.stringify(Object.assign({}, inp, { bmi: null, bridgeView: null, bridgeRaw: null }))); c.bmi = inp.bmi; c.bridgeView = inp.bridgeView; c.bridgeRaw = inp.bridgeRaw; u.patch(c, v); return fingerprint(core(c)); });
-      const same = prints.every((p) => p === prints[0]);
-      // 網站沒有其他既有資料可以解決 → 結果不同時一律為 Critical-Query（不是 Blocking）
-      return { id: u.id, about: u.about, category: same ? 'Disclosure' : 'Critical-Query', note: same ? '不論答案是什麼，結論都一樣' : '答案不同，結論會不同；需要向企業確認' };
-    });
-  }
-
-  // ---------- M1-L4 六題 ----------
-  const date2key = (s) => { const m = String(s || '').match(/(\d{4})(?:\D+(\d{1,2}))?/); return m ? Number(m[1]) * 100 + Number(m[2] || 12) : null; };
-  function advice(inp, r, unknowns) {
-    const bmi = inp.bmi || { candidates: [], decision: null };
-    const ent = r.needs.filter((n) => n.layer === 'enterprise');
-    const Q1 = ent.map((n) => ({ need: n.id, text: `${n.label}${n.text ? `：${n.text}` : ''}`, type: { External: '外部', Strategy: '公司自己的需求', Operational: '營運問題' }[n.origin], date: n.date || '未提供', grade: GR_TEXT[n.grade], data: n.data }));
-    const watch = (bmi.scenarios && bmi.scenarios.watch) || [];
-    const Q2 = ent.map((n) => ({ need: n.id, text: n.label, source: n.sources.map((s) => `${s.kind}（${SOURCE_TEXT[s.source] || GR_TEXT[s.grade]}）`).join('；'),
-      scope: [['廠區', n.site], ['製程或用途', n.process], ['期限', n.horizon], ['規模', n.scale]].map(([k, v]) => `${k}：${known(v) ? v : '未知'}`).join('；'),
-      grade: GR_TEXT[n.grade], applies: { yes: '適用', no: '不適用', unknown: '是否適用還不確定' }[n.applies] || '是否適用還不確定', established: n.established, note: n.statusNote, possibleDup: n.possibleDup || '' }));
-    const Q3 = bmi.candidates.map((c) => {
-      const au = (inp.audit && inp.audit.candidates || []).find((x) => x.id === c.id);
-      const o = au ? au.output : null;
-      const certainty = bmi.decision && bmi.decision.candidate === c.id ? ({ dominant: '較高（占優）', conditional: '有條件', test: '低（需情境測試）' }[bmi.decision.type] || '低') : '低（非主要方向）';
-      return { cand: c.id, label: c.label,
-        bm_elements: o && o.elementChanges.length ? o.elementChanges.map((x) => x.name).join('、') : '不改變元素',
-        cost_structure: (c.changes || []).includes('COS16') ? '會調整成本結構' : '不直接改變成本結構',
-        competitive_advantage: (inp.intake.goals && inp.intake.goals.sca && inp.intake.goals.sca.length) ? `企業選的競爭優勢來源：${inp.intake.goals.sca.join('、')}；${o ? `相容性 ${o.sca.compatibility}、創新性 ${o.sca.innovation}、適應性 ${o.sca.adaptability}` : '未評估'}` : '企業沒有選競爭優勢來源',
-        operational_risk: ent.some((n) => n.origin === 'Operational') ? '企業提出營運問題，需一併考慮' : '沒有提出營運問題',
-        resource_allocation: o && o.requiredCRA.length ? o.requiredCRA.map((x) => `${x.construct}＝${x.classification}`).join('；') : '不需新構面，或論文沒有顯著構面',
-        certainty };
-    });
-    const ev = (c, k) => (c.eval && c.eval[k] ? c.eval[k].rating : '—');
-    const Q4 = bmi.candidates.map((c) => { const o = r.outcomes.find((x) => x.cand === c.id);
-      return { cand: c.id, label: c.label, kind: c.kind, rank: o.rank, conditional: o.conditional, ip: ev(c, 'ip'), compat: ev(c, 'compat'), innov: ev(c, 'innov'), fit: ev(c, 'fit'), feas: ev(c, 'feas'), research: c.eval ? (c.eval.research ? '研究支持' : '研究未支持') : '—',
-        changes: (c.changes || []).map((x) => D.ELEMENTS[x] ? D.ELEMENTS[x].name : x).join('、') || '不改變元素', compliance: o.compliance, logic: o.logic, displayed: o.displayed, blocking: o.blocking, caveats: o.caveats,
-        h4: r.endogenous.rows.map((e) => `${e.label}：${REL_TEXT[(e.rows.find((x) => x.cand === c.id) || {}).rel] || '—'}`) }; });
-    // Q5 排序（r3）
-    const Q5 = [];
-    ent.filter((n) => n.eorg).forEach((n) => Q5.push({ tier: 1, tag: '重大營運風險', text: `處理「${n.label}」${n.text ? `（${n.text}）` : ''}`, need: n.id }));
-    const maint = r.outcomes.find((o) => o.kind === 'maintain');
-    r.hard.slice().sort((a, b) => (date2key(a.deadline) == null) - (date2key(b.deadline) == null) || (date2key(a.deadline) || 0) - (date2key(b.deadline) || 0)).forEach((h) => {
-      const st = { MET: '已符合', NOT_MET: '不符合', UNDETERMINED: '符合狀態還不能確定' }[h.status];
-      Q5.push({ tier: 1, tag: '硬性要求', need: h.need, text: `回應「${h.label}」${h.text ? `（${h.text}）` : ''}。期限：${h.deadline || '未知'}。${st}${h.status === 'UNDETERMINED' ? `，原因：${h.basis}` : ''}。` + (maint && maint.compliance === 'NON_COMPLIANT' ? '維持現況不符合此要求。' : maint && maint.compliance === 'COMPLIANCE_UNDETERMINED' ? '維持現況是否符合此要求，也還不能確定。' : '') });
-    });
-    unknowns.filter((u) => u.category === 'Critical-Query').forEach((u) => Q5.push({ tier: 2, tag: '需要確認', text: `請確認：${u.about}。` }));
-    const byNeed = {}; r.functions.filter((f) => f.status !== 'APPLICABLE' && f.status !== 'NOT_APPLICABLE').forEach((f) => { (byNeed[f.need] = byNeed[f.need] || { label: f.needLabel, fns: [] }).fns.push(f.fnName); });
-    Object.keys(byNeed).forEach((k) => Q5.push({ tier: 3, tag: '功能驗證', need: k, text: `確認「${byNeed[k].label}」可以用哪些碳／能源功能處理：${byNeed[k].fns.join('、')}（功能與對照都尚未驗證）。` }));
-    if (bmi.decision) Q5.push({ tier: 4, tag: 'BMI 方向', text: `${bmi.decision.title}。${bmi.decision.text}` });
-    const leadId = bmi.decision && bmi.decision.candidate;
-    r.endogenous.rows.forEach((e) => { const lr = e.rows.find((x) => x.cand === leadId); const other = e.rows.filter((x) => x.cand !== leadId && /CHANGE_ADDRESSES/.test(x.rel));
-      if (lr && !/CHANGE_ADDRESSES/.test(lr.rel) && other.length) Q5.push({ tier: 5, tag: '說明', text: `BMI 首選「${lr.label}」沒有處理「${e.label}${e.text ? `：${e.text}` : ''}」，而 ${other.map((x) => `「${x.label}」`).join('、')} 有處理。對照尚未驗證，BMI 排序不變。` }); });
-    r.options.filter((o) => o.type === 'operational_improvement' && o.stage === 'Comparable').forEach((o) => Q5.push({ tier: 6, tag: '納入比較（非強制）', text: o.label }));
-    r.options.filter((o) => o.type === 'resource' && o.stage === 'Comparable').forEach((o) => Q5.push({ tier: 7, tag: '可考慮（非強制）', text: o.label }));
-    // Q6
-    const Q6 = ((inp.dynamic && inp.dynamic.triggers) || []).map((t) => ({ kind: '觸發條件', when: t.when || '', text: t.text }));
-    ent.filter((n) => known(n.date) || known(n.horizon)).forEach((n) => Q6.push({ kind: '有日期的來源', when: n.horizon || n.date, text: `「${n.label}」的期限或更新日期到了時` }));
-    unknowns.filter((u) => u.category !== 'Disclosure').forEach((u) => Q6.push({ kind: '補到資料後', when: '', text: `確認${u.about}之後` }));
-    return { Q1, Q1watch: watch.map((s) => `${s.demandName}（可信度 ${s.grade}，觀察中）`), Q2, Q3, Q4, Q5, Q6 };
-  }
-
   function build(inp) {
-    const r = core(inp);
-    const unknowns = dru(inp);
-    const adv = advice(inp, r, unknowns);
-    // 追溯（M1-L5 T-TRACE）：每個建議項目要能追到至少一個資料節點
-    const trace = adv.Q5.map((q) => ({ item: q.text, data: q.need ? (r.needs.find((n) => n.id === q.need) || { data: [] }).data : q.tier === 4 ? ['37 題＋延伸評估 → BMI 推論'] : q.tier === 2 ? ['永續與能源頁、公司需求頁的「不確定」答案'] : ['公司需求頁'] }));
-    return Object.assign(r, { unknowns, advice: adv, trace, spec: 'M1 Logic Specification v0.3.1（Howard 2026-11-16 規格層驗收）', impl: 'Maggie 這邊依規格自行實作，尚未與 Howard 的 m1.js 逐筆比對', mode: 'EXPLORATORY' });
+    const input = toInput(inp.intake);
+    const out = H.runM1(input);
+    const trace = H.traceIntegrity(out);
+    return Object.assign(out, { m1_input: input.m1, trace_check: trace, engine: 'Howard M1 原型 r3.1（m1.js SHA-256 6241342f…，原樣）；網站問卷轉換：m1-adapter.js' });
   }
-
-  root.M1 = { build, KIND, RCLASS, FN, GR_TEXT, REL_TEXT };
-})(typeof window !== 'undefined' ? window : globalThis);
+  root.M1 = { build, toInput, KIND, RCLASS: RCLASS.map((r) => r.slice(0, 3)), FN, SC_LABEL };
+})(window);
 </script>
 <script id="eko-log">
 window.EKO_LOG = (function () {
@@ -8192,45 +8495,63 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     try { return R.build(I.assess(JSON.parse(JSON.stringify(S.intake)))).bridge || null; }
     catch (e) { return { skipped: true, reason: 'Bridge 無法執行：' + e.message }; }
   }
-  // 11/20：M1 策略前瞻（Howard M1 規格 v0.3.1）。P3 放第 1–4 題，P4 放第 5–6 題；結果在按「產生商模診斷報告」時算好（generate）
+  // 11/20：M1 策略前瞻。計算用 Howard 的 M1 原型 r3.1（m1.js 原樣），這裡只負責顯示；代碼旁附中文。P3 放第 1–4 題，P4 放第 5–6 題
+  const M1T = {
+    'Need Identified': '成立', 'Need Unknown': '暫不成立', VERIFIED: '已查證', SELF_REPORT_TRACEABLE: '企業自述、可追溯', SURVEY_INFERENCE: '問卷推論', NONE: '沒有來源',
+    'External-Driven': '外部', 'Strategy-Driven': '公司策略', 'Operational-Driven': '營運',
+    APPLICABLE: '適用', MAPPING_UNVALIDATED: '對照未驗證', CONCEPTUAL_LINK_ONLY: '只有概念連結', NOT_APPLICABLE: '不適用',
+    NAMED: '有點名', NOT_NAMED: '沒有點名', CONFIRMED: '已確認', UNKNOWN: '未知', VALIDATED: '已驗證', PENDING: '待驗證', CONCEPTUAL: '概念連結', UNVALIDATED: '未驗證（D-11）',
+    Comparable: '可比較', Exploratory: '探索性', NO_HARD_REQUIREMENT: '沒有硬性要求', COMPLIANT: '符合', COMPLIANCE_UNDETERMINED: '還不能確定', NON_COMPLIANT: '不符合', REQUIRES_RESPONSE: '需要回應',
+    'NON_COMPLIANT (EXPLORATORY)': '不符合（探索性）', MET: '符合', NOT_MET: '不符合', UNDETERMINED: '還不能確定',
+    Disclosure: '不影響結論', Blocking: '擋住結論', 'Critical-Query': '一定要問公司',
+    process: '程序', bmi_direction: 'BMI 方向', explanation: '說明', option: '選項', resource: '資源',
+    maintain: '維持', operational_improvement: '營運改善', bm_adjustment: '商模調整', compliance: '硬性要求', endogenous_fit: '公司需求對照',
+    O0: 'O0｜資料不足以判定', O1: 'O1｜可以列入比較',
+  };
+  const m1t = (x) => (x == null || x === '' ? '—' : M1T[x] ? `${M1T[x]}` : String(x));
   function dashM1Box(part) {
     const v = latest(), m = v && v.report && v.report.m1;
     const head = `<div class="dc" style="border:2px dashed #b08900;margin-top:22px"><h3 style="margin:0 0 4px">EKO 未來推演：M1 策略前瞻（Howard Chou 方法）${part === 'p3' ? '｜一～四' : '｜五～六'}</h3>
-      <p class="small muted" style="margin:0 0 10px">以下依 Howard 的 M1 規格自動產生，接在 BMI 與 Bridge 的結果之後。規則尚未經真實企業驗證，企業資料多為自述、尚未查證；網站一律以「探索性」呈現，只供討論，不是建議。</p>`;
+      <p class="small muted" style="margin:0 0 10px">以下由 Howard 的 M1 原型（r3.1，150／150 合成測試）自動產生，接在 BMI 與 Bridge 的結果之後。規則在規格層已驗收、尚未經真實企業驗證；企業資料多為自述、尚未查證；網站一律以「探索性」呈現，只供討論，不是建議。</p>`;
     if (!m) return head + '<p>這份報告是在 M1 加入前產生的。請按「修改問卷答案」，到最後一頁按「重新產生商模診斷報告」。</p></div>';
     if (m.error) return head + `<p>M1 無法執行：${esc(m.error)}</p></div>`;
+    if (!m.advice || !m.advice.Q1_changes) return head + '<p>這份報告是用舊版 M1 產生的。請按「修改問卷答案」，到最後一頁按「重新產生商模診斷報告」。</p></div>';
     const A = m.advice, L = (t, xs) => `<h4>${t}</h4>${xs}`;
-    const tbl = (h, rows) => `<div class="table-wrap"><table><thead><tr>${h.map((x) => `<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
-    const why = (lines) => `<details class="why"><summary>依據與規則</summary><div class="small muted">${lines.map(esc).join('<br>')}</div></details>`;
-    const OUT = { O0: 'O0｜資料不足以判定', O1: 'O1｜可以列入比較', 'NON_COMPLIANT (EXPLORATORY)': '不符合硬性要求（探索性）' };
-    const CMP = { NO_HARD_REQUIREMENT: '沒有硬性要求', COMPLIANT: '符合', COMPLIANCE_UNDETERMINED: '還不能確定', NON_COMPLIANT: '不符合', REQUIRES_RESPONSE: '需要回應' };
+    const tbl = (h, rows) => rows.length ? `<div class="table-wrap"><table><thead><tr>${h.map((x) => `<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '<p class="small muted">沒有項目。</p>';
+    const td = (x, cls) => `<td class="small${cls ? ' ' + cls : ''}">${x}</td>`;
+    const why = (lines) => `<details class="why"><summary>依據與規則（技術說明）</summary><div class="small muted">${lines.map(esc).join('<br>')}</div></details>`;
     if (part === 'p3') {
-      const q1 = A.Q1.length ? `<ul class="plain">${A.Q1.map((x) => `<li><b>${esc(x.type)}</b>｜${esc(x.text)}<span class="small muted">（日期 ${esc(x.date)}；證據：${esc(x.grade)}）</span></li>`).join('')}</ul>` : '<p>沒有提出外部要求、公司需求或營運問題，市場變化也沒有成為正式情境。</p>';
-      const q1w = A.Q1watch.length ? `<p class="small muted">觀察清單（還不是正式情境）：${A.Q1watch.map(esc).join('、')}</p>` : '';
-      const q2 = A.Q2.length ? tbl(['項目', '來源', '適用範圍', '證據等級', '是否成立'], A.Q2.map((x) => `<tr><td class="small"><b>${esc(x.text)}</b></td><td class="small">${esc(x.source)}</td><td class="small">${esc(x.scope)}<br>${esc(x.applies)}</td><td class="small">${esc(x.grade)}</td><td class="small">${x.established ? '成立' : `暫不成立：${esc(x.note)}`}${x.possibleDup ? '<br>可能與另一項重複' : ''}</td></tr>`)) : '<p>沒有項目。</p>';
-      const q3 = tbl(['方向', '調整的商模元素', '成本結構', '競爭優勢', '能力・資源・活動', '確定程度'], A.Q3.map((x) => `<tr><td class="small"><b>${esc(x.label)}</b></td><td class="small">${esc(x.bm_elements)}</td><td class="small">${esc(x.cost_structure)}</td><td class="small">${esc(x.competitive_advantage)}</td><td class="small">${esc(x.resource_allocation)}</td><td class="small">${esc(x.certainty)}</td></tr>`));
-      const q4 = tbl(['方向', 'BMI 排序', '預期適配', '相容性', '創新性', '現況適配', '投入可行性', '研究依據', '硬性要求', 'M1 結論'], A.Q4.map((x) => `<tr><td class="small"><b>${esc(x.label)}</b>${x.h4.length ? `<div class="muted">${x.h4.map(esc).join('<br>')}</div>` : ''}</td><td class="small">${x.rank ? `第 ${x.rank}` : x.conditional ? '條件式（不可行，移出排序）' : '未排序'}</td><td>${esc(x.ip)}</td><td>${esc(x.compat)}</td><td>${esc(x.innov)}</td><td>${esc(x.fit)}</td><td>${esc(x.feas)}</td><td class="small">${esc(x.research)}</td><td class="small">${esc(CMP[x.compliance] || x.compliance)}</td>
-        <td class="small"><b>${esc(OUT[x.displayed] || x.displayed)}</b><div class="muted">規則結果：${esc(x.logic ? OUT[x.logic] : '不給代碼')}${x.blocking.length ? `；卡住的原因：${x.blocking.map(esc).join('；')}` : ''}${x.caveats.length ? `；${x.caveats.map(esc).join('；')}` : ''}</div></td></tr>`));
-      const opts = m.options.filter((o) => o.type !== 'maintain' && o.type !== 'bm_adjustment');
-      const fnTbl = m.functions.length ? tbl(['需求', '碳／能源功能', '明文要求', '企業適用性', '功能驗證', '對照驗證', '狀態'], m.functions.map((f) => `<tr><td class="small">${esc(f.needLabel)}</td><td class="small">${esc(f.fnName)}</td><td class="small">${f.layers.explicit === 'NAMED' ? '有點名' : '沒有點名'}</td><td class="small">${{ CONFIRMED: '已確認', UNKNOWN: '未知', NOT_APPLICABLE: '不適用' }[f.layers.enterprise]}</td><td class="small">${{ VALIDATED: '已驗證', PENDING: '待驗證', CONCEPTUAL: '概念連結' }[f.layers.function] || f.layers.function}</td><td class="small">${f.layers.mapping === 'VALIDATED' ? '已驗證' : '未驗證（D-11）'}</td><td class="small">${f.status === 'APPLICABLE' ? '適用' : '對照未驗證'}<div class="muted">${esc(f.reason)}</div></td></tr>`)) : '';
+      const needs = m.layer1.needs;
+      const q1 = A.Q1_changes.length ? `<ul class="plain">${A.Q1_changes.map((x) => `<li><b>${esc(m1t(x.type))}</b>｜${esc(x.text || '')}<span class="small muted">（日期 ${esc(x.date || '未提供')}；證據：${esc(m1t(x.grade))}）</span></li>`).join('')}</ul>` : '<p>沒有提出外部要求、公司需求或營運問題，市場變化也沒有成為正式情境。</p>';
+      const q2 = tbl(['編號', '項目', '來源', '適用範圍', '證據等級', '是否成立'], needs.map((n) => `<tr>${td(esc(n.need_id))}${td(`<b>${esc(n.text || '')}</b>`)}${td(esc(n.source_types.map(m1t).join('＋')))}
+        ${td(esc([['廠區', n.site], ['製程或用途', n.process_or_use], ['期限', n.horizon], ['規模', n.scale]].map(([k, x]) => `${k}：${x || '未知'}`).join('；')))}${td(esc(m1t(n.evidence_grade)))}
+        ${td(`${esc(m1t(n.status))}${n.status_note ? `<div class="muted">${esc(n.status_note)}</div>` : ''}${n.possible_duplicates.length ? `<div class="muted">可能與 ${esc(n.possible_duplicates.join('、'))} 重複</div>` : ''}${n.enterprise_level ? '' : '<div class="muted">候選層</div>'}`)}</tr>`));
+      const q3 = tbl(['編號', '商模元素', '成本結構', '競爭優勢', '營運風險', '資源配置', '確定程度'], m.impacts.map((i) => `<tr>${td(esc(i.need_id))}${td(`${esc((i.bm_elements.values || []).join('、') || '—')}<div class="muted">${esc(i.bm_elements.basis || '')}</div>`)}${td(esc(i.cost_structure))}${td(esc(i.competitive_advantage))}${td(esc(i.operational_risk))}${td(esc(i.resource_allocation))}${td(esc(i.certainty))}</tr>`));
+      const res = v.assessment && v.assessment.main && v.assessment.main.result;
+      const rk = (id) => (res && res.ranked ? res.ranked.indexOf(id) + 1 : 0);
+      const ev = (id, k) => { const c = res && res.candidates.find((x) => x.id === id); return c && c.eval && c.eval[k] ? c.eval[k].rating : '—'; };
+      const q4c = tbl(['方向', 'BMI 排序', '預期適配', '相容性', '創新性', '現況適配', '投入可行性', '硬性要求', 'M1 結論'], m.candidate_outcomes.map((c) => `<tr>${td(`<b>${esc(c.label)}</b>`)}${td(rk(c.candidate) ? `第 ${rk(c.candidate)}` : '未排序')}${['ip', 'compat', 'innov', 'fit', 'feas'].map((k) => td(esc(ev(c.candidate, k)))).join('')}
+        ${td(`${esc(m1t(c.compliance.state))}<div class="muted">${esc(c.compliance.text || '')}</div>`)}
+        ${td(`<b>${esc(m1t(c.v2_displayed_outcome))}</b><div class="muted">規則結果：${esc(c.v2_logic_outcome ? m1t(c.v2_logic_outcome) : '不給代碼')}${c.display_label ? `；${esc(c.display_label)}` : ''}${(c.blocking || []).length ? `；卡住的原因：${esc(c.blocking.join('；'))}` : ''}${c.v2_logic_outcome === 'O1' && c.o1_scope ? `；範圍：${esc(c.o1_scope)}` : ''}${(c.o1_caveats || []).length ? `；提醒：${esc(c.o1_caveats.join('；'))}` : ''}</div>`)}</tr>`));
+      const q4o = `<ul class="plain small">${A.Q4_options.map((o) => `<li>${esc(o.option)}<span class="muted">（${esc(m1t(o.type))}；${esc(m1t(o.stage))}）</span></li>`).join('')}</ul>`;
+      const fnT = tbl(['需求', '碳／能源功能', '明文要求', '企業適用性', '功能驗證', '對照驗證', '狀態'], m.layer2.functions.map((f) => `<tr>${td(esc(f.need_id))}${td(esc(`${f.fn} ${window.M1.FN[f.fn] || ''}`))}${['explicit_requirement', 'enterprise_applicability', 'function_validation', 'mapping_validation'].map((k) => td(esc(m1t(f.layers[k])))).join('')}${td(`${esc(m1t(f.status))}<div class="muted">${esc(f.reason || '')}</div>`)}</tr>`));
       return head
-        + L('一、發生什麼變化', q1 + q1w)
+        + L('一、發生什麼變化', q1)
         + L('二、為什麼跟貴公司有關', q2)
         + L('三、對競爭力有什麼影響', q3)
-        + L('四、有哪些選項', `<p class="small">維持＝架構與元素都不變；強化＝保留架構，調整、增減特定元素；轉型＝改變整個商業模式類型與組件（三項條件須同時成立，未確認前只稱「轉型候選」）。「維持」每次都列入比較。</p>${q4}
-          ${opts.length ? `<h5 class="h5">營運改善與碳／能源方案</h5><ul class="plain small">${opts.map((o) => `<li>${esc(o.label)}：${o.stage === 'Comparable' ? '可以比較' : '探索性'}${o.next ? `（${esc(o.next)}）` : ''}</li>`).join('')}</ul>${fnTbl}` : ''}
+        + L('四、有哪些選項', `<p class="small">維持＝架構與元素都不變；強化＝保留架構，調整、增減特定元素；轉型＝改變整個商業模式類型與組件（三項條件須同時成立，未確認前只稱「轉型候選」）。「維持」每次都列入比較。</p>${q4c}<h5 class="h5">所有選項</h5>${q4o}<h5 class="h5">碳／能源功能的四層檢查</h5>${fnT}
           <p class="small muted">M1 不改變 BMI 的排序，也不產生「需要碳權」或「應購買」的選項。</p>`)
-        + why([m.spec, m.impl, '證據等級：已查證＞企業自述、可追溯＞問卷推論＞沒有來源；「可以提供文件」在 EKO 核對前不算已查證（Decision 8）', '需求合併：廠區、製程或用途、目的、期限、規模五項都已知且相同才合併（L1-2）', '公司需求與各方向的對照（H4）使用附錄 B 對照表，對照尚未驗證（D-11），BMI 排序不變']) + '</div>';
+        + why([m.engine, `輸出格式：${m.schema}`, '證據等級：已查證＞企業自述、可追溯＞問卷推論＞沒有來源；「可以提供文件」在 EKO 核對前不算已查證（Decision 8）。網站沒有文件核對紀錄，所以不會出現「已查證」', '需求合併：廠區、製程或用途、目的、期限、規模五項都已知且相同才合併（L1-2）', '公司需求與各方向的對照（H4）使用附錄 B 對照表，對照尚未驗證（D-11），BMI 排序不變']) + '</div>';
     }
-    const T = { 1: '企業層事項', 2: '需要確認', 3: '功能驗證', 4: 'BMI 方向', 5: '說明', 6: '營運改善', 7: '資源方案' };
-    const q5 = A.Q5.length ? `<ol class="actions">${A.Q5.map((q) => `<li><div><b>${esc(q.tag)}</b><span>${esc(q.text)}</span><span class="small muted">${esc(T[q.tier])}</span></div></li>`).join('')}</ol>` : '<p>目前沒有需要排序的事項。</p>';
-    const q6 = A.Q6.length ? `<ul class="plain">${A.Q6.map((t) => `<li>${t.when ? `<b>${esc(t.when)}</b>　` : ''}${esc(t.text)}<span class="small muted">（${esc(t.kind)}）</span></li>`).join('')}</ul>` : '<p>沒有設定重新評估的時機。</p>';
-    const unk = m.unknowns.length ? `<details class="why"><summary>不確定的事項（${m.unknowns.length} 項）怎麼分類</summary><ul class="plain small">${m.unknowns.map((u) => `<li><b>${{ Disclosure: '不影響結論', Blocking: '可從既有資料補', 'Critical-Query': '一定要問公司' }[u.category]}</b>：${esc(u.about)}（${esc(u.note)}）</li>`).join('')}</ul></details>` : '';
+    const q5 = A.Q5_priorities.length ? `<ol class="actions">${A.Q5_priorities.map((q) => `<li><div><b>${esc(m1t(q.kind))}</b><span>${esc(q.action)}</span>${q.deadline ? `<span class="small muted">期限 ${esc(q.deadline)}</span>` : ''}</div></li>`).join('')}</ol>` : '<p>目前沒有需要排序的事項。</p>';
+    const q6 = A.Q6_reassessment.length ? `<ul class="plain">${A.Q6_reassessment.map((t) => `<li>${t.when ? `<b>${esc(t.when)}</b>　` : ''}${esc(t.text)}<span class="small muted">（${esc(t.rule || '')}）</span></li>`).join('')}</ul>` : '<p>沒有設定重新評估的時機。</p>';
+    const unk = m.unknowns.length ? `<details class="why"><summary>不確定的事項（${m.unknowns.length} 項）怎麼分類</summary><ul class="plain small">${m.unknowns.map((u) => `<li><b>${esc(m1t(u.class))}</b>：${esc(u.about)}<span class="muted">（${esc(u.basis)}）</span></li>`).join('')}</ul></details>` : '';
+    const hard = m.hard_requirements.length ? `<p class="small">硬性要求：${m.hard_requirements.map((h) => `${esc(h.need_id)}「${esc(h.text || '')}」${esc(m1t(h.status))}（${esc(h.basis || '')}；期限 ${esc(h.deadline || '未知')}）`).join('；')}</p>` : '';
     return head
-      + L('五、現在先做什麼', q5 + unk)
+      + L('五、現在先做什麼', hard + q5 + unk)
       + L('六、什麼時候要重新評估', q6)
-      + `<details class="why"><summary>每一項的資料來源（追溯）</summary><ul class="plain small">${m.trace.map((t) => `<li>${esc(t.item)}<br><span class="muted">← ${t.data.map(esc).join('；')}</span></li>`).join('')}</ul></details>`
-      + why([m.spec, m.impl, '排序：① 已查證營運缺口（重大營運風險）→ 硬性要求依期限由近到遠 ② 一定要問公司的事 ③ 功能驗證 ④ BMI 方向（照引擎原文）⑤ BMI 首選沒有處理公司需求的說明 ⑥ 可比較的營運改善 ⑦ 可比較的資源方案（r3 排序）', '網站沒有 EKO 文件核對紀錄，所以硬性要求的符合狀態一律「還不能確定」，也不會出現「重大營運風險」']) + '</div>';
+      + `<p class="small muted">追溯檢查：${m.trace_check.items} 個建議項目，${m.trace_check.broken.length ? `${m.trace_check.broken.length} 個追不到資料來源` : '每一項都追得到資料來源'}。</p>`
+      + why([m.engine, '排序（r3）：① 已查證營運缺口（重大營運風險）→ 硬性要求依期限由近到遠 ② 一定要問公司的事 ③ 功能驗證 ④ BMI 方向（照引擎原文）⑤ BMI 首選沒有處理公司需求的說明 ⑥ 可比較的營運改善 ⑦ 可比較的資源方案']) + '</div>';
   }
 
   function dashBridgeBox(part) {
