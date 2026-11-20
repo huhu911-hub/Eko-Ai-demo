@@ -126,6 +126,17 @@ button { font: inherit; cursor: pointer; color: inherit; }
 .steps-intro b { display: block; font-family: var(--display); }
 .steps-intro span { font-size: 13px; color: var(--muted); }
 .fineprint { color: var(--faint); font-size: 12px; padding-block: 16px 40px; }
+/* 11/20 Maggie：13 吋筆電一進首頁，一個畫面看完標題、說明、告知同意、按鈕與四個步驟；「只要調間距」，字級不動（只在螢幕高度 ≤ 1000px 的電腦套用；大螢幕不變） */
+.hero .consent-box { margin: 0; text-align: left; padding: 10px 14px; }
+.hero .consent-box p { margin: 0 0 6px; }
+@media (min-width: 761px) and (max-height: 1000px) {
+  .hero .wrap { padding-block: 36px 30px; gap: 14px; }
+  .about { padding-block: 22px 0; gap: 6px; }
+  .about h2.page { margin: 0; }
+  .steps-intro { padding-block: 10px 0; }
+  .steps-intro li { padding: 12px 14px; }
+  .fineprint { padding-block: 10px 28px; }
+}
 
 /* 表單 */
 main.form { padding-block: 28px 64px; display: grid; gap: 20px; max-width: 820px; }
@@ -7408,6 +7419,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       <button type="button" class="btn small primary nav-btn" id="signup">${en ? 'Sign up' : '註冊'}</button>` : '';
   }
   function go(view, opts = {}) {
+    if ((FORM_STEPS.includes(view) || ['dash', 'report', 'diagnosis', 'advice', 'midresult', 'answers'].includes(view)) && !consented()) { S.needConsent = true; view = 'welcome'; opts = {}; } // 11/20 告知同意
     if (['report', 'diagnosis', 'advice', 'midresult'].includes(view)) { view = 'dash'; opts = {}; } // v3：37 題 → 延伸評估 → 商模診斷報告；舊報告頁導回商模診斷報告
     if (view === 'diagnosis') { view = 'report'; opts.page = 'p1'; }
     if (view === 'advice') { view = 'report'; opts.page = 'p3'; }
@@ -7444,6 +7456,15 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       fine: 'Preliminary assessment: the questionnaire is designed on the framework of Howard Chou\'s PhD thesis (University of Strathclyde, 2023) and has not completed formal scale validation. Sections marked "EKO future scenarios" use rules that are still under review and are for discussion only. The assessment pages are currently in Traditional Chinese.',
       account: 'No account is needed for this demo. Your assessment and report stay in this browser; select "Try it Free" to begin.' },
   };
+  // 11/20 外部測試：開始填寫前的告知同意（Maggie 核定文字）。勾選後才能進入公司資料與問卷；同意紀錄存在 intake.consent，隨填寫紀錄送出
+  const START_CONSENT = { zh: '您在 EKO AI 填寫的內容（包含公司資料與問卷作答）會被記錄，僅用於 EKO 的研究與產品改善，不會對外公開，也不會提供給第三方。', en: 'What you enter in EKO AI (company details and questionnaire answers) is recorded and used only for EKO research and product improvement. It will not be made public or shared with third parties.' };
+  const START_CONSENT_OK = { zh: '我已了解並同意', en: 'I understand and agree' };
+  const consented = () => !!(S.intake.consent && S.intake.consent.agreed);
+  function consentBox() {
+    const L = S.lang === 'en' ? 'en' : 'zh';
+    return `<div class="notice consent-box${S.needConsent && !consented() ? ' warn' : ''}"><p>${esc(START_CONSENT[L])}</p>
+      <label class="chipbox"><input type="checkbox" id="consent-start"${consented() ? ' checked' : ''}>${esc(START_CONSENT_OK[L])}</label>${S.needConsent && !consented() ? `<p class="small" style="margin:8px 0 0">${L === 'en' ? 'Please tick the box above to start.' : '請先勾選上面的同意，才能開始填寫。'}</p>` : ''}</div>`;
+  }
   function viewWelcome() {
     const c = COVER[S.lang === 'en' ? 'en' : 'zh'];
     const resume = S.intake.profile.name || Object.keys(S.intake.answers).length;
@@ -7452,6 +7473,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
         <p class="tag">${c.tag}</p>
         <p class="lead">${c.lead}</p>
         
+        ${consentBox()}
         <div class="cta"><button class="btn primary" data-go="${resume && FORM_STEPS.includes(S.resumeView) ? S.resumeView : 'profile'}" id="start">${resume ? c.resume : c.try}</button><button class="btn ghost" id="about-btn">${c.more}</button></div>
         ${resume && S.lang !== 'en' ? (() => { const STEP = { profile: '公司資料', goals: '創新目標與市場', sustain: '永續與能源', cra: '能力與資源' }; const v = FORM_STEPS.includes(S.resumeView) ? S.resumeView : 'profile'; const where = v === 'assess' ? `問卷「${I.SECTIONS[S.sec || 0].title}」` : STEP[v]; const n = Object.keys(S.intake.answers || {}).filter((k) => S.intake.answers[k] != null).length; const nm = esc(S.intake.profile.name || '（未填公司名稱）');   // v3：改稱「商模健檢」，只寫做到哪一步、不寫題數
         return `<p class="small muted" style="margin-top:10px">${latest() ? `${nm}的商模健檢已完成，可以查看商模診斷報告。` : `你有一份未完成的商模健檢：${nm}，做到「${where}」。`}</p>`; })() : ''}
@@ -7504,6 +7526,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     const YN = [['yes', '是'], ['no', '否'], ['unknown', '不確定']];
     const TF = [['true', '是'], ['false', '否']];
     // 公司資料
+    add('consent.agreed', '已勾選告知同意', [['true', '是'], ['false', '否']]); add('consent.at', '同意時間'); add('consent.text', '同意的告知文字');
     add('profile.taxId', '公司統編／股票代號'); add('profile.name', '公司名稱');
     add('profile.industry', '產業', o2(I.INDUSTRIES)); add('profile.industryOther', '其他產業');
     add('profile.region', '總部所在國家', o2(I.REGIONS)); add('profile.regionOther', '其他國家');
@@ -9266,6 +9289,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     else if (t.type === 'radio' && t.name.startsWith('sig.')) { const [, k, f] = t.name.split('.'); S.intake.signals[k][f] = t.value; }
     else if (t.type === 'radio' && t.name.startsWith('fb.')) { S.fb = Object.assign({}, S.fb, { [t.name.slice(3)]: t.value }); save(); syncSubmit(); return; }
     else if (t.dataset.fb) { S.fb = Object.assign({}, S.fb, { [t.dataset.fb]: t.value }); save(); return; }
+    else if (t.id === 'consent-start') { S.intake.consent = t.checked ? { agreed: true, at: new Date().toISOString(), text: START_CONSENT[S.lang === 'en' ? 'en' : 'zh'] } : null; if (t.checked) S.needConsent = false; save(); const y = window.scrollY; render(); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); return; }
     else if (t.id === 'consent') { S.fb = Object.assign({}, S.fb, { consent: t.checked }); save(); syncSubmit(); return; }
     else if (t.type === 'radio' && t.name.startsWith('fx.')) {
       const [, fn, k] = t.name.split('.'); const su = S.intake.sustain; su.fx = su.fx || {}; su.fx[fn] = Object.assign({}, su.fx[fn], { [k]: t.value });
