@@ -7728,6 +7728,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     if (['report', 'diagnosis', 'advice', 'midresult'].includes(view)) { view = 'dash'; opts = {}; } // v3：37 題 → 延伸評估 → 商模診斷報告；舊報告頁導回商模診斷報告
     if (view === 'diagnosis') { view = 'report'; opts.page = 'p1'; }
     if (view === 'advice') { view = 'report'; opts.page = 'p3'; }
+    S.gapWarn = null;
     S.view = view; if (opts.sec != null) S.sec = opts.sec; if (opts.page) S.page = opts.page;
     if (FORM_STEPS.includes(view)) S.resumeView = view; // 記住最後的填答步驟，給「繼續評估」用
     window.EKO_LOG.view(S); // 填寫紀錄
@@ -7800,6 +7801,45 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
   function select(id, opts, cur, placeholder) {
     return `<select id="${id}" data-bind="${id}"><option value="">${esc(placeholder || '請選擇')}</option>${opts.map((o) => `<option value="${esc(o[0])}"${String(cur) === String(o[0]) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>`;
   }
+  // 11/20 Maggie：延伸評估各頁沒填完要往下時先提醒；報告缺值時可以直接跳回補填
+  function pageGaps(v) {
+    const g = S.intake.goals || {}, out = [];
+    if (v === 'goals') {
+      if (!g.lastRound) out.push('上一輪的新產品或創新計畫，有沒有達到預期');
+      for (const [k, l] of I.SIGNAL_TYPES) { const s = (S.intake.signals || {})[k]; if (s && s.on && !s.source) out.push(`市場變化「${l}」的資訊來源`); }
+    } else if (v === 'sustain') {
+      const ch = (S.intake.sustain || {}).challenges || {};
+      for (const [sc, l] of BI.CHALLENGES) {
+        const c = ch[sc]; if (!c || !c.on) continue;
+        const miss = [!c.text && '簡短說明', !c.source && '資訊來源', !c.applies && '是否確定適用'].filter(Boolean);
+        if (miss.length) out.push(`外部要求「${l}」的${miss.join('、')}`);
+      }
+    } else if (v === 'needs') {
+      const m = S.intake.m1 || {};
+      Object.entries(m.needs || {}).forEach(([i, n]) => { if (n && n.on) { const miss = [!n.kind && '類型', !n.text && '簡短說明', !n.source && '資訊來源'].filter(Boolean); if (miss.length) out.push(`公司自己想做的事第 ${+i + 1} 項的${miss.join('、')}`); } });
+      Object.entries(m.ops || {}).forEach(([i, n]) => { if (n && n.on) { const miss = [!n.rclass && '類型', !n.text && '簡短說明', !n.source && '資訊來源'].filter(Boolean); if (miss.length) out.push(`營運上遇到的問題第 ${+i + 1} 項的${miss.join('、')}`); } });
+    } else if (v === 'cra') {
+      const c = S.intake.cra || {}, f = S.intake.feas || {};
+      const nc = Object.keys(D.CONSTRUCTS).filter((k) => !c[k]).length; if (nc) out.push(`能力、資源與活動：${nc} 題`);
+      const nf = ['E', 'T', 'pilot'].filter((k) => !f[k]).length; if (nf) out.push(`投入條件：${nf} 題`);
+    }
+    return out;
+  }
+  const GAP_NEXT = { goals: () => go('sustain'), sustain: () => go('needs'), needs: () => go('cra'), cra: () => generate() };
+  function gapStop(v) {
+    if (!pageGaps(v).length) return false;
+    S.gapWarn = v; render();
+    const el = document.getElementById('gap-notice'); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return true;
+  }
+  function gapNotice(v) {
+    if (S.gapWarn !== v) return '';
+    const gs = pageGaps(v); if (!gs.length) return '';
+    return `<div class="notice warn" id="gap-notice"><b>這一頁還有 ${gs.length} 項沒填：</b><ul class="plain small" style="margin:6px 0">${gs.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>沒填的話，商模診斷報告第 3 頁「轉型跑道」的建議會出現缺值。
+      <div class="navrow" style="margin-top:10px"><button type="button" class="btn small ghost" id="gap-back">回去補填</button><button type="button" class="btn small primary" id="gap-go">先跳過，繼續下一步</button></div></div>`;
+  }
+  const firstGapView = () => ['goals', 'sustain', 'needs', 'cra'].find((v) => pageGaps(v).length) || 'cra';
+  const fillBtn = (v) => ` <button type="button" class="btn small ghost" data-go="${v}">去補填</button>`;
   function qPage() { const n = I.SECTIONS.length; return S.view === 'assess' ? S.sec + 1 : { goals: n + 1, sustain: n + 2, needs: n + 3, cra: n + 4 }[S.view] || 0; }   // v3：問卷第幾頁（37 題 5 頁＋延伸評估 4 頁；11/20 加 M1 需求頁）
   const qStep = () => `Step 2 · Questionnaire · ${qPage()}/${I.SECTIONS.length + 4}`;
   function formHead(eyebrow, title, sub) {
@@ -8507,9 +8547,26 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     process: '程序', bmi_direction: 'BMI 方向', explanation: '說明', option: '選項', resource: '資源',
     maintain: '維持', operational_improvement: '營運改善', bm_adjustment: '商模調整', compliance: '硬性要求', endogenous_fit: '公司需求對照',
     O0: 'O0｜資料不足以判定', O1: 'O1｜可以列入比較',
+    // 11/20：報告裡原本直接顯示的英文
+    'applicability unknown': '適用範圍不明', 'evidence below traceable self-report': '證據不足（還沒有可追溯的企業自述）',
+    'affected (verified need)': '會受影響（需求已查證）', 'possibly affected (unverified)': '可能受影響（未查證）', 'not assessed': '未評估',
+    'no stated SCA source matched': '沒有對應到您填的競爭優勢來源', 'SCA objective not set': '沒有填競爭優勢來源',
+    'verified operating shortfall': '已查證的營運缺口', 'risk reported, shortfall not verified': '有提到風險，缺口未查證', 'external continuity requirement': '外部要求穩定供電',
+    'decided by enterprise; options compared in M1-L3': '由企業決定；選項在第四點比較', supported: '有依據', 'unverified link — not a conclusion': '關聯未查證，不是結論',
+    'BMI engine S5 (v1.2 test rules)': '由 BMI 推得（測試版規則）', 'AI mapping (T4) — Mapping Unvalidated': 'AI 對照（未驗證）', 'not determined': '未判定', 'unvalidated mapping': '對照未驗證',
   };
-  const m1t = (x) => (x == null || x === '' ? '—' : M1T[x] ? `${M1T[x]}` : String(x));
+  const m1t = (x) => { if (x == null || x === '') return '—'; if (M1T[x]) return M1T[x]; const m = /^touches stated SCA source "(.+)"$/.exec(String(x)); if (m) { const s = I.SCA_SOURCES.find((y) => y[0] === m[1]); return `對應到您填的競爭優勢來源「${s ? s[1] : m[1]}」`; } return String(x); };
+  // 11/20 Maggie：企業沒填「簡短說明」時不要留白，說明缺了什麼，並可直接回去補填
+  const m1SrcView = (tr) => (/^D-SC/.test(tr || '') ? 'sustain' : /^D-SIG/.test(tr || '') ? 'goals' : 'needs');
+  const m1SrcName = (tr) => { const m = /^D-(SC\d+)$/.exec(tr || ''); const c = m && BI.CHALLENGES.find((x) => x[0] === m[1]); return c ? `外部要求「${c[1]}」` : '這一項'; };
+  const m1Text = (text, tr, short) => (text ? esc(text) : `${esc(m1SrcName(tr))}<span class="muted" style="font-weight:400">${short ? '（沒有填寫簡短說明）' : '：您沒有填寫「簡短說明」，所以無法說明發生了什麼，也無法對應到貴公司的哪個部分。'}</span>${fillBtn(m1SrcView(tr))}`);
+  // 11/20：M1 原型產生的幾句英文，顯示前換成中文（計算不變）
   function dashM1Box(part) {
+    return dashM1BoxRaw(part)
+      .replace(/M1 Layer 2 \(separate field\): ([^<]*?); V1 statuses unchanged/g, 'M1 第二層（另列）：$1；Bridge 原本的判斷不變')
+      .replace(/Enterprise Outstanding Needs/g, '企業層級待處理需求');
+  }
+  function dashM1BoxRaw(part) {
     const v = latest(), m = v && v.report && v.report.m1;
     const head = `<div class="dc" style="border:2px dashed #b08900;margin-top:22px"><h3 style="margin:0 0 4px">EKO 未來推演：M1 策略前瞻（Howard Chou 方法）${part === 'p3' ? '｜一～四' : '｜五～六'}</h3>
       <p class="small muted" style="margin:0 0 10px">以下由 Howard 的 M1 原型（r3.1，150／150 合成測試）自動產生，接在 BMI 與 Bridge 的結果之後。規則在規格層已驗收、尚未經真實企業驗證；企業資料多為自述、尚未查證；網站一律以「探索性」呈現，只供討論，不是建議。</p>`;
@@ -8522,11 +8579,11 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     const why = (lines) => `<details class="why"><summary>依據與規則（技術說明）</summary><div class="small muted">${lines.map(esc).join('<br>')}</div></details>`;
     if (part === 'p3') {
       const needs = m.layer1.needs;
-      const q1 = A.Q1_changes.length ? `<ul class="plain">${A.Q1_changes.map((x) => `<li><b>${esc(m1t(x.type))}</b>｜${esc(x.text || '')}<span class="small muted">（日期 ${esc(x.date || '未提供')}；證據：${esc(m1t(x.grade))}）</span></li>`).join('')}</ul>` : '<p>沒有提出外部要求、公司需求或營運問題，市場變化也沒有成為正式情境。</p>';
-      const q2 = tbl(['編號', '項目', '來源', '適用範圍', '證據等級', '是否成立'], needs.map((n) => `<tr>${td(esc(n.need_id))}${td(`<b>${esc(n.text || '')}</b>`)}${td(esc(n.source_types.map(m1t).join('＋')))}
+      const q1 = A.Q1_changes.length ? `<ul class="plain">${A.Q1_changes.map((x) => `<li><b>${esc(m1t(x.type))}</b>｜${m1Text(x.text, x.trace)}<span class="small muted">（日期 ${esc(x.date || '未提供')}；證據：${esc(m1t(x.grade))}）</span></li>`).join('')}</ul>` : '<p>沒有提出外部要求、公司需求或營運問題，市場變化也沒有成為正式情境。</p>';
+      const q2 = tbl(['編號', '項目', '來源', '適用範圍', '證據等級', '是否成立'], needs.map((n) => `<tr>${td(esc(n.need_id))}${td(`<b>${m1Text(n.text, (n.sources[0] || {}).data, true)}</b>`)}${td(esc(n.source_types.map(m1t).join('＋')))}
         ${td(esc([['廠區', n.site], ['製程或用途', n.process_or_use], ['期限', n.horizon], ['規模', n.scale]].map(([k, x]) => `${k}：${x || '未知'}`).join('；')))}${td(esc(m1t(n.evidence_grade)))}
-        ${td(`${esc(m1t(n.status))}${n.status_note ? `<div class="muted">${esc(n.status_note)}</div>` : ''}${n.possible_duplicates.length ? `<div class="muted">可能與 ${esc(n.possible_duplicates.join('、'))} 重複</div>` : ''}${n.enterprise_level ? '' : '<div class="muted">候選層</div>'}`)}</tr>`));
-      const q3 = tbl(['編號', '商模元素', '成本結構', '競爭優勢', '營運風險', '資源配置', '確定程度'], m.impacts.map((i) => `<tr>${td(esc(i.need_id))}${td(`${esc((i.bm_elements.values || []).join('、') || '—')}<div class="muted">${esc(i.bm_elements.basis || '')}</div>`)}${td(esc(i.cost_structure))}${td(esc(i.competitive_advantage))}${td(esc(i.operational_risk))}${td(esc(i.resource_allocation))}${td(esc(i.certainty))}</tr>`));
+        ${td(`${esc(m1t(n.status))}${n.status_note ? `<div class="muted">${esc(m1t(n.status_note))}</div>` : ''}${n.possible_duplicates.length ? `<div class="muted">可能與 ${esc(n.possible_duplicates.join('、'))} 重複</div>` : ''}${n.enterprise_level ? '' : '<div class="muted">候選層</div>'}`)}</tr>`));
+      const q3 = tbl(['編號', '商模元素', '成本結構', '競爭優勢', '營運風險', '資源配置', '確定程度'], m.impacts.map((i) => `<tr>${td(esc(i.need_id))}${td(`${esc((i.bm_elements.values || []).join('、') || '—')}<div class="muted">${esc(i.bm_elements.basis ? m1t(i.bm_elements.basis) : '')}</div>`)}${td(esc(m1t(i.cost_structure)))}${td(esc(m1t(i.competitive_advantage)))}${td(esc(m1t(i.operational_risk)))}${td(esc(m1t(i.resource_allocation)))}${td(esc(m1t(i.certainty)))}</tr>`));
       const res = v.assessment && v.assessment.main && v.assessment.main.result;
       const rk = (id) => (res && res.ranked ? res.ranked.indexOf(id) + 1 : 0);
       const ev = (id, k) => { const c = res && res.candidates.find((x) => x.id === id); return c && c.eval && c.eval[k] ? c.eval[k].rating : '—'; };
@@ -8564,11 +8621,11 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
     if (part === 'p3') {
       const rows = b.candidates.map((c) => `<tr><td><b>${esc(c.label)}</b>${c.rank ? `<br><span class="small muted">BMI 排序第 ${c.rank}</span>` : ''}</td><td>${code(c.outcome)}</td>
         <td class="small">${c.own.length ? c.own.map((o) => esc(o.name)).join('、') : '在已評估範圍內不需新增'}${c.pending.length ? `<br>待確認：${c.pending.map((o) => esc(o.name)).join('、')}` : ''}</td></tr>`).join('');
-      return head + `<p>每個轉型方向，Bridge 判斷要不要新增碳相關資源：</p><div class="table-wrap"><table><thead><tr><th>轉型方向</th><th>Bridge 結論</th><th>可能需要的碳相關資源</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      return head + `<p>每個轉型方向，Bridge 判斷要不要新增碳相關資源：</p><div class="table-wrap"><table><thead><tr><th>轉型方向</th><th>Bridge 結論</th><th>可能需要的碳相關資源</th></tr></thead><tbody>${rows}</tbody></table></div>${b.candidates.some((c) => c.outcome && c.outcome.code === 'O0') ? `<p class="small">顯示「資料不足以判定」，是因為延伸評估有些答案沒填。${fillBtn(firstGapView())}</p>` : ''}</div>`;
     }
     const ch = b.challenges.length ? `<ul class="plain">${b.challenges.map((c) => `<li><b>${esc(c.status)}</b>：${esc(c.sentence)}</li>`).join('')}</ul>` : '<p>沒有提出永續或能源相關的外部要求。</p>';
     return head + `<p><b>${esc(b.headline)}</b></p>
-      <h4>整體結論</h4><p>${code(b.enterprise.outcome)}</p>
+      <h4>整體結論</h4><p>${code(b.enterprise.outcome)}</p>${b.enterprise.outcome && b.enterprise.outcome.code === 'O0' ? `<p class="small">顯示「資料不足以判定」，是因為延伸評估有些答案沒填。${fillBtn(firstGapView())}</p>` : ''}
       <h4>外部要求（客戶、法規等）</h4>${ch}
       ${b.enterprise.common.length ? `<h4>所有方向都要面對的缺口</h4><p>${b.enterprise.common.map(esc).join('、')}</p>` : ''}
       ${b.next.length ? `<h4>下一步要補的資料</h4><ul class="plain">${b.next.map((n) => `<li><b>${esc(n.area)}</b>：${esc(n.text)}</li>`).join('')}</ul>` : ''}</div>`;
@@ -8631,6 +8688,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
         ${I.SIGNAL_TYPES.map(([k, l]) => signalBox(k, l)).join('')}
         <p class="small muted">沒有勾選任何變化也可以繼續；報告會說明缺少市場資訊時能判斷到什麼程度。</p></div>
       ${miss ? '<div class="notice warn">請選擇最優先的創新成果。</div>' : ''}
+      ${gapNotice('goals')}
       <div class="navrow"><button class="btn ghost" id="prev-goals">上一步</button><button class="btn primary" id="next-goals">下一段</button></div>
     </main>`;
   }
@@ -8692,6 +8750,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       <div class="card"><div class="qtitle">關於貴公司的營運（用來判斷哪些減排或電力途徑適用）</div>
         ${BI.PROFILE.map(([k, l]) => `<div class="field"><span>${esc(l)}</span>${ynu('sustain.profile.' + k, su.profile[k])}</div>`).join('')}</div>`
         : '<p class="small muted">勾選任一項外部要求或壓力後，才需要填寫相關資源與營運條件。</p>'}
+      ${gapNotice('sustain')}
       <div class="navrow"><button class="btn ghost" id="prev-sustain">上一步</button><button class="btn primary" id="next-sustain">下一段</button></div>
     </main>`;
   }
@@ -8741,6 +8800,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       <div class="card"><div class="qtitle">貴公司自己想做、但不是外部要求的事？</div><p class="small muted">例如降低成本、提高效率、提升競爭力、調整商業模式。最多兩項。</p>${need(0)}${(m.needs || {})[0] && m.needs[0].on ? need(1) : ''}</div>
       <div class="card"><div class="qtitle">營運上遇到的電力或能源問題？</div><p class="small muted">例如供電不穩、設備效率差、缺少備援電力。最多兩項。</p>${op(0)}${(m.ops || {})[0] && m.ops[0].on ? op(1) : ''}</div>
       ${scs.length ? `<div class="card"><div class="qtitle">上一頁勾選的外部要求，適用範圍是？</div><p class="small muted">用來判斷要求落在哪裡、有沒有跟其他需求重複。不知道可以留白。</p>${scs.map(scopeBox).join('')}</div>` : ''}
+      ${gapNotice('needs')}
       <div class="navrow"><button class="btn ghost" id="prev-needs">上一步</button><button class="btn primary" id="next-needs">下一段</button></div>
     </main>`;
   }
@@ -8757,6 +8817,7 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
         <div class="field"><span>是否能先支應一個小規模的試辦？</span>${radios('feas.pilot', I.FEAS_OPTIONS, f.pilot)}</div>
       </div>
       ${latest() ? '' : '<div id="gen-msg"></div>'}
+      ${gapNotice('cra')}
       <div class="navrow"><button class="btn ghost" id="prev-cra">上一步</button><button class="btn primary" id="${latest() ? 'generate2' : 'generate'}">${latest() ? '重新產生商模診斷報告' : '產生商模診斷報告'}</button></div>
     </main>`;
   }
@@ -9750,13 +9811,17 @@ document.addEventListener('visibilitychange', function () { if (document.visibil
       case 'next-mid': { return go('goals');
       }
       case 'prev-goals': return go('assess', { sec: I.SECTIONS.length - 1 });
-      case 'next-goals': if (!S.intake.goals.ipPrimary) { S.showMissing = true; return go('goals', { keepScroll: true }); } S.showMissing = false; return go('sustain');
+      case 'next-goals': if (!S.intake.goals.ipPrimary) { S.showMissing = true; return go('goals', { keepScroll: true }); } S.showMissing = false; if (gapStop('goals')) return; return go('sustain');
       case 'prev-sustain': return go('goals');
-      case 'next-sustain': case 'skip-sustain': return go('needs');
+      case 'next-sustain': if (gapStop('sustain')) return; return go('needs');
+      case 'skip-sustain': return go('needs');
       case 'prev-needs': return go('sustain');
-      case 'next-needs': case 'skip-needs': return go('cra');
+      case 'next-needs': if (gapStop('needs')) return; return go('cra');
+      case 'skip-needs': return go('cra');
       case 'prev-cra': return go('needs');
-      case 'generate': case 'generate2': return generate();
+      case 'generate': case 'generate2': if (S.view === 'cra' && gapStop('cra')) return; return generate();
+      case 'gap-go': { const v = S.gapWarn; S.gapWarn = null; return GAP_NEXT[v] ? GAP_NEXT[v]() : render(); }
+      case 'gap-back': { S.gapWarn = null; render(); window.scrollTo({ top: 0, left: 0, behavior: 'smooth' }); return; }
       case 'fx-regen': return generate();
       case 'submit-sub': if (fbReady()) submitSubmission(); return;
       case 'download-sub': if (fbReady()) downloadSubmission(buildSubmission()).then((ok) => { const m = $('#submit-msg'); if (m) m.textContent = ok ? '已下載提交檔，請寄給提供連結的 EcoStrategy 人員。' : '無法下載。'; }); return;
